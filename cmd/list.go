@@ -41,6 +41,65 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
+		// Also find "created" agents that don't have a container yet
+		var grovesToScan []string
+		if listAll {
+			// This is a bit hard since we don't track all groves
+			// For now, let's at least check current and global
+			if pd, err := config.GetResolvedProjectDir(""); err == nil {
+				grovesToScan = append(grovesToScan, pd)
+			}
+			if gd, err := config.GetGlobalDir(); err == nil {
+				grovesToScan = append(grovesToScan, gd)
+			}
+		} else {
+			projectDir, err := config.GetResolvedProjectDir(grovePath)
+			if err == nil {
+				grovesToScan = append(grovesToScan, projectDir)
+			}
+		}
+
+		runningNames := make(map[string]bool)
+		for _, a := range agents {
+			runningNames[a.Name] = true
+		}
+
+		for _, gp := range grovesToScan {
+			agentsDir := filepath.Join(gp, "agents")
+			entries, err := os.ReadDir(agentsDir)
+			if err != nil {
+				continue
+			}
+			groveName := config.GetGroveName(gp)
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				if runningNames[e.Name()] {
+					continue
+				}
+
+				// Check scion.json
+				agentScionJSON := filepath.Join(agentsDir, e.Name(), "home", "scion.json")
+				data, err := os.ReadFile(agentScionJSON)
+				if err != nil {
+					continue
+				}
+				var cfg config.ScionConfig
+				if err := json.Unmarshal(data, &cfg); err == nil && cfg.Agent != nil {
+					if cfg.Agent.Status == "created" {
+						agents = append(agents, runtime.AgentInfo{
+							Name:      e.Name(),
+							Grove:     groveName,
+							GrovePath: gp,
+							Status:    "created",
+							Image:     cfg.Image,
+						})
+					}
+				}
+			}
+		}
+
 		if len(agents) == 0 {
 			if listAll {
 				fmt.Println("No active agents found across any groves.")
@@ -68,7 +127,11 @@ var listCmd = &cobra.Command{
 					}
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Grove, agentStatus, a.Status, a.ID, a.Image)
+			containerStatus := a.Status
+			if containerStatus == "created" && a.ID == "" {
+				containerStatus = "none"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Grove, agentStatus, containerStatus, a.ID, a.Image)
 		}
 		w.Flush()
 		return nil

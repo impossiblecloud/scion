@@ -50,7 +50,7 @@ The agent will be created from a template.`,
 
 		fmt.Printf("Creating agent '%s'...\n", agentName)
 
-		_, _, _, err = ProvisionAgent(agentName, templateName, agentImage, grovePath)
+		_, _, _, err = ProvisionAgent(agentName, templateName, agentImage, grovePath, "created")
 		if err != nil {
 			return err
 		}

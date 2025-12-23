@@ -45,7 +45,7 @@ func DeleteAgentFiles(agentName string) error {
 	return nil
 }
 
-func ProvisionAgent(agentName string, templateName string, agentImage string, grovePath string) (string, string, []*config.Template, error) {
+func ProvisionAgent(agentName string, templateName string, agentImage string, grovePath string, optionalStatus string) (string, string, []*config.Template, error) {
 	// 1. Prepare agent directories
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
@@ -119,6 +119,9 @@ func ProvisionAgent(agentName string, templateName string, agentImage string, gr
 	finalScionCfg.Agent = &config.AgentConfig{
 		Grove: groveName,
 		Name:  agentName,
+	}
+	if optionalStatus != "" {
+		finalScionCfg.Agent.Status = optionalStatus
 	}
 	if agentImage != "" {
 		finalScionCfg.Image = agentImage

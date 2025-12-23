@@ -78,7 +78,7 @@ form the task prompt.`,
 		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 			fmt.Printf("Provisioning agent '%s'...\n", agentName)
 			var chain []*config.Template
-			agentHome, agentWorkspace, chain, err = ProvisionAgent(agentName, templateName, agentImage, grovePath)
+			agentHome, agentWorkspace, chain, err = ProvisionAgent(agentName, templateName, agentImage, grovePath, "")
 			if err != nil {
 				return err
 			}

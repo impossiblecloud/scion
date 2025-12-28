@@ -19,12 +19,13 @@ func TestLoadSettings(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 
 	groveDir := filepath.Join(tmpDir, "my-grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	// 1. Test defaults
-	s, err := LoadSettings(groveDir)
+	s, err := LoadSettings(groveScionDir)
 	if err != nil {
 		t.Fatalf("LoadSettings failed: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestLoadSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err = LoadSettings(groveDir)
+	s, err = LoadSettings(groveScionDir)
 	if err != nil {
 		t.Fatalf("LoadSettings failed: %v", err)
 	}
@@ -72,15 +73,11 @@ func TestLoadSettings(t *testing.T) {
 			"default_context": "gke-dev"
 		}
 	}`
-	groveScionDir := filepath.Join(groveDir, ".scion")
-	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(groveScionDir, "settings.json"), []byte(groveSettings), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	s, err = LoadSettings(groveDir)
+	s, err = LoadSettings(groveScionDir)
 	if err != nil {
 		t.Fatalf("LoadSettings failed: %v", err)
 	}
@@ -105,18 +102,19 @@ func TestUpdateSetting(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 
 	groveDir := filepath.Join(tmpDir, "my-grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	// Update local setting
-	err := UpdateSetting(groveDir, "default_runtime", "kubernetes", false)
+	err := UpdateSetting(groveScionDir, "default_runtime", "kubernetes", false)
 	if err != nil {
 		t.Fatalf("UpdateSetting failed: %v", err)
 	}
 
 	// Verify file content
-	content, err := os.ReadFile(filepath.Join(groveDir, ".scion", "settings.json"))
+	content, err := os.ReadFile(filepath.Join(groveScionDir, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,17 +123,17 @@ func TestUpdateSetting(t *testing.T) {
 	}
 
 	// Update default_template
-	err = UpdateSetting(groveDir, "default_template", "my-template", false)
+	err = UpdateSetting(groveScionDir, "default_template", "my-template", false)
 	if err != nil {
 		t.Fatalf("UpdateSetting default_template failed: %v", err)
 	}
-	content, _ = os.ReadFile(filepath.Join(groveDir, ".scion", "settings.json"))
+	content, _ = os.ReadFile(filepath.Join(groveScionDir, "settings.json"))
 	if !strings.Contains(string(content), `"default_template": "my-template"`) {
 		t.Errorf("expected file to contain default_template: my-template, got %s", string(content))
 	}
 
 	// Update global setting
-	err = UpdateSetting(groveDir, "docker.host", "tcp://localhost:2375", true)
+	err = UpdateSetting(groveScionDir, "docker.host", "tcp://localhost:2375", true)
 	if err != nil {
 		t.Fatalf("UpdateSetting global failed: %v", err)
 	}
@@ -173,12 +171,13 @@ func TestValidateRuntime(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 
 	groveDir := filepath.Join(tmpDir, "my-grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, tt := range tests {
-		err := UpdateSetting(groveDir, "default_runtime", tt.input, false)
+		err := UpdateSetting(groveScionDir, "default_runtime", tt.input, false)
 		if tt.want {
 			if err != nil {
 				t.Errorf("UpdateSetting(%q) failed: %v", tt.input, err)

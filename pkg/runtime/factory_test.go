@@ -3,82 +3,40 @@ package runtime
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/ptone/scion-agent/pkg/runtime/kubernetes"
 )
 
 func TestGetRuntime(t *testing.T) {
-	// Save original env
-	orig := os.Getenv("GEMINI_SANDBOX")
-	defer os.Setenv("GEMINI_SANDBOX", orig)
+	// Clear PATH to avoid auto-detection of local runtimes (container, docker)
+	// which might override the settings-based resolution on different machines.
+	t.Setenv("PATH", "")
 
-	t.Run("EnvVar_Container", func(t *testing.T) {
-		os.Setenv("GEMINI_SANDBOX", "container")
-		r := GetRuntime("")
-		if _, ok := r.(*AppleContainerRuntime); !ok {
-			t.Errorf("expected *AppleContainerRuntime, got %T", r)
-		}
-	})
-
-	t.Run("EnvVar_Local", func(t *testing.T) {
-		os.Setenv("GEMINI_SANDBOX", "local")
-		r := GetRuntime("")
-		if runtime.GOOS == "darwin" {
-			if _, ok := r.(*AppleContainerRuntime); !ok {
-				t.Errorf("expected *AppleContainerRuntime on darwin, got %T", r)
-			}
-		} else {
-			if _, ok := r.(*DockerRuntime); !ok {
-				t.Errorf("expected *DockerRuntime on %s, got %T", runtime.GOOS, r)
-			}
-		}
-	})
-
-	t.Run("EnvVar_Remote", func(t *testing.T) {
-		os.Setenv("GEMINI_SANDBOX", "remote")
-		r := GetRuntime("")
-		// Remote resolves to kubernetes, which currently falls back to docker in the factory switch
-		if _, ok := r.(*DockerRuntime); !ok {
-			t.Errorf("expected *DockerRuntime (fallback from kubernetes), got %T", r)
-		}
-	})
-
-	t.Run("EnvVar_Docker", func(t *testing.T) {
-		os.Setenv("GEMINI_SANDBOX", "docker")
-		r := GetRuntime("")
-		if _, ok := r.(*DockerRuntime); !ok {
-			t.Errorf("expected *DockerRuntime, got %T", r)
-		}
-	})
-
-	t.Run("Default_AutoDetect", func(t *testing.T) {
-		os.Unsetenv("GEMINI_SANDBOX")
-		// This depends on what's available in the environment running the test.
-		// We just want to ensure it doesn't panic and returns a valid runtime.
-		r := GetRuntime("")
-		if r == nil {
-			t.Error("expected a runtime instance, got nil")
-		}
-	})
-
-	t.Run("Settings_File", func(t *testing.T) {
-		os.Unsetenv("GEMINI_SANDBOX")
-		
-		// Mock HOME for settings
+	// Test default behavior (LoadSettings defaults to "docker")
+	t.Run("Default", func(t *testing.T) {
+		// Ensure we are not picking up some random settings file
 		tmpHome := t.TempDir()
-		origHome := os.Getenv("HOME")
-		os.Setenv("HOME", tmpHome)
-		defer os.Setenv("HOME", origHome)
+		t.Setenv("HOME", tmpHome)
+		t.Setenv("SCION_GROVE", "") // Ensure no grove path influence
 
-		geminiDir := filepath.Join(tmpHome, ".gemini")
-		if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		r := GetRuntime("")
+		if _, ok := r.(*DockerRuntime); !ok {
+			t.Errorf("expected *DockerRuntime by default (from LoadSettings), got %T", r)
+		}
+	})
+
+	t.Run("Settings_Global_Container", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		globalDir := filepath.Join(tmpHome, ".scion")
+		if err := os.MkdirAll(globalDir, 0755); err != nil {
 			t.Fatal(err)
 		}
 
-		// Write settings to force "container"
-		// Note: The factory logic checks for string or bool.
-		err := os.WriteFile(filepath.Join(geminiDir, "settings.json"), 
-			[]byte(`{"tools": {"sandbox": "container"}}`), 0644)
+		err := os.WriteFile(filepath.Join(globalDir, "settings.json"), 
+			[]byte(`{"default_runtime": "container"}`), 0644)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,6 +44,55 @@ func TestGetRuntime(t *testing.T) {
 		r := GetRuntime("")
 		if _, ok := r.(*AppleContainerRuntime); !ok {
 			t.Errorf("expected *AppleContainerRuntime from settings, got %T", r)
+		}
+	})
+
+	t.Run("Settings_Global_Remote", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		globalDir := filepath.Join(tmpHome, ".scion")
+		if err := os.MkdirAll(globalDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		err := os.WriteFile(filepath.Join(globalDir, "settings.json"), 
+			[]byte(`{"default_runtime": "remote"}`), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r := GetRuntime("")
+		// Remote resolves to kubernetes
+		if _, ok := r.(*kubernetes.KubernetesRuntime); !ok {
+			t.Errorf("expected *kubernetes.KubernetesRuntime, got %T", r)
+		}
+	})
+
+	t.Run("Settings_Grove_Override", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+		
+		// Create a fake grove project
+		grovePath := filepath.Join(tmpHome, "myproject")
+		groveScionDir := filepath.Join(grovePath, ".scion")
+		if err := os.MkdirAll(groveScionDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		// Global says container
+		globalDir := filepath.Join(tmpHome, ".scion")
+		if err := os.MkdirAll(globalDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(globalDir, "settings.json"), []byte(`{"default_runtime": "container"}`), 0644)
+
+		// Grove says docker
+		os.WriteFile(filepath.Join(groveScionDir, "settings.json"), []byte(`{"default_runtime": "docker"}`), 0644)
+
+		r := GetRuntime(groveScionDir)
+		if _, ok := r.(*DockerRuntime); !ok {
+			t.Errorf("expected *DockerRuntime from grove override, got %T", r)
 		}
 	})
 }

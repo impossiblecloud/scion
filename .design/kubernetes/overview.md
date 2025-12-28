@@ -42,6 +42,7 @@ Since the workspace is ephemeral, changes made by the agent must be explicitly r
 *   **Manual Sync:** A new command `scion sync <agent-name>` will stream files from the Pod's `/workspace` back to the local directory.
 *   **On Stop:** When `scion stop <agent-name>` is called, the CLI will prompt (or accept a flag `--sync`) to pull changes before destroying the Pod.
     *   *Mechanism:* `kubectl exec -i <pod> -- tar -cz -C /workspace . | tar -xz -C ./local/path`
+*   **Future improvement** Use mutagen for live sync
 
 ### 2. The Identity Problem (Auth & Config)
 Different agents (Gemini, Claude) require different authentication credentials and configuration files.
@@ -57,7 +58,7 @@ The `KubernetesRuntime` will rely on the `harness.Harness` interface to discover
 
 ### 3. Security & Isolation (Agent Sandbox)
 #### Solution: K8s agent sandbox
-The `KubernetesRuntime` will support a https://github.com/kubernetes-sigs/agent-sandbox - This project is developing a Sandbox Custom Resource Definition (CRD) and controller for Kubernetes. A research note on this is available in k8s-agent-sandbox.md in the .design folder of this repo.
+The `KubernetesRuntime` will support a https://github.com/kubernetes-sigs/agent-sandbox - This project is developing a Sandbox Custom Resource Definition (CRD) and controller for Kubernetes. A research note on this is available in `agent-sandbox.md` in the `.design/kubernetes` folder of this repo.
 
 ## Local Representation & State
 

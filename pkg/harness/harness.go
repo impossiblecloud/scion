@@ -4,16 +4,8 @@ import (
 	"github.com/ptone/scion-agent/pkg/api"
 )
 
-type Harness interface {
-	Name() string
-	DiscoverAuth(agentHome string) api.AuthConfig
-	GetEnv(agentName string, unixUsername string, model string, auth api.AuthConfig) map[string]string
-	GetCommand(task string, resume bool) []string
-	PropagateFiles(homeDir, unixUsername string, auth api.AuthConfig) error
-	GetVolumes(unixUsername string, auth api.AuthConfig) []api.VolumeMount
-	DefaultConfigDir() string
-	HasSystemPrompt() bool
-}
+// Harness is now defined in pkg/api to avoid import cycles
+type Harness = api.Harness
 
 func New(provider string) Harness {
 	switch provider {

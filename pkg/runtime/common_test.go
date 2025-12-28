@@ -25,13 +25,13 @@ func TestBuildCommonRunArgs(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		config  RunConfig
+		config  api.RunConfig
 		wantIn  []string
 		wantOut []string
 	}{
 		{
 			name: "basic config",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -42,7 +42,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "workspace and home",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -59,7 +59,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "gemini api key",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name: "test-agent",
 				Auth: api.AuthConfig{
@@ -71,7 +71,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "labels and tmux",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name: "test-agent",
 				Labels: map[string]string{
@@ -89,7 +89,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "oauth propagation with home",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -103,7 +103,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "adc propagation without home",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -120,7 +120,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "other auth and model",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name: "test-agent",
 				Auth: api.AuthConfig{
@@ -140,7 +140,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "resume and env",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:  "test-agent",
 				Image: "scion-agent:latest",
@@ -155,7 +155,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "resume and tmux",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:    "test-agent",
 				Image:   "scion-agent:latest",
@@ -169,7 +169,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "template label",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:     "test-agent",
 				Image:    "scion-agent:latest",
@@ -181,7 +181,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "oauth without home",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -197,7 +197,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "git relative workspace",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
@@ -213,7 +213,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		},
 		{
 			name: "generic volumes",
-			config: RunConfig{
+			config: api.RunConfig{
 				Harness: &harness.GeminiCLI{},
 				Volumes: []api.VolumeMount{
 					{Source: "/host/path", Target: "/container/path", ReadOnly: true},

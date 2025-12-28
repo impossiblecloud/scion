@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
+
+	"github.com/ptone/scion-agent/pkg/api"
 )
 
 type AppleContainerRuntime struct {
-	Command string // usually "container"
+	Command string
 }
 
 func NewAppleContainerRuntime() *AppleContainerRuntime {
@@ -17,7 +20,7 @@ func NewAppleContainerRuntime() *AppleContainerRuntime {
 	}
 }
 
-func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
+func (r *AppleContainerRuntime) Run(ctx context.Context, config api.RunConfig) (string, error) {
 	args, err := buildCommonRunArgs(config)
 	if err != nil {
 		return "", err
@@ -33,7 +36,9 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 	if err != nil {
 		return "", fmt.Errorf("container run failed: %w (output: %s)", err, out)
 	}
-	return out, nil
+
+	// The output of 'container run -d' is the container ID
+	return strings.TrimSpace(out), nil
 }
 
 func (r *AppleContainerRuntime) Stop(ctx context.Context, id string) error {
@@ -42,6 +47,8 @@ func (r *AppleContainerRuntime) Stop(ctx context.Context, id string) error {
 }
 
 func (r *AppleContainerRuntime) Delete(ctx context.Context, id string) error {
+	// For container, we might need to stop it first if we want to delete it,
+	// but 'rm' usually works if it's stopped.
 	_, err := runSimpleCommand(ctx, r.Command, "rm", id)
 	return err
 }
@@ -57,7 +64,7 @@ type containerListOutput struct {
 	} `json:"configuration"`
 }
 
-func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string]string) ([]AgentInfo, error) {
+func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
 	args := []string{"list", "-a", "--format", "json"}
 
 	cmd := exec.CommandContext(ctx, r.Command, args...)
@@ -71,11 +78,8 @@ func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string
 		return nil, fmt.Errorf("failed to parse container list output: %w (output: %s)", err, string(out))
 	}
 
-	// fmt.Printf("Raw containers: %d\n", len(raw))
-
-	var agents []AgentInfo
+	var agents []api.AgentInfo
 	for _, c := range raw {
-		// fmt.Printf("Checking container %s, labels: %+v\n", c.Configuration.ID, c.Configuration.Labels)
 		// Filter by labels if requested
 		if len(labelFilter) > 0 {
 			match := true
@@ -90,62 +94,29 @@ func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string
 			}
 		}
 
-		agents = append(agents, AgentInfo{
-			ID:        c.Configuration.ID,
-			Name:      c.Configuration.Labels["scion.name"],
-			Template:  c.Configuration.Labels["scion.template"],
-			Grove:     c.Configuration.Labels["scion.grove"],
-			GrovePath: c.Configuration.Labels["scion.grove_path"],
-			Labels:    c.Configuration.Labels,
-			Status:    c.Status,
-			Image:     c.Configuration.Image.Reference,
+		agents = append(agents, api.AgentInfo{
+			ID:          c.Configuration.ID,
+			Name:        c.Configuration.Labels["scion.name"],
+			Template:    c.Configuration.Labels["scion.template"],
+			Grove:       c.Configuration.Labels["scion.grove"],
+			GrovePath:   c.Configuration.Labels["scion.grove_path"],
+			Labels:      c.Configuration.Labels,
+			Annotations: c.Configuration.Labels,
+			Status:      c.Status,
+			Image:       c.Configuration.Image.Reference,
 		})
 	}
 
 	return agents, nil
 }
 
+
 func (r *AppleContainerRuntime) GetLogs(ctx context.Context, id string) (string, error) {
 	return runSimpleCommand(ctx, r.Command, "logs", id)
 }
 
 func (r *AppleContainerRuntime) Attach(ctx context.Context, id string) error {
-	useTmux := false
-	var agent *AgentInfo
-
-	// Try to find labels from list first
-	agents, err := r.List(ctx, nil)
-	if err == nil {
-		for _, a := range agents {
-			if a.ID == id || a.Name == id {
-				agent = &a
-				if a.Labels["scion.tmux"] == "true" {
-					useTmux = true
-				}
-				break
-			}
-		}
-	}
-
-	if agent == nil {
-		return fmt.Errorf("agent '%s' not found", id)
-	}
-
-	if !useTmux {
-		// For Apple Container, we'll try to detect it by running a quick exec.
-		checkTmux := exec.CommandContext(ctx, r.Command, "exec", id, "tmux", "ls")
-		if err := checkTmux.Run(); err == nil {
-			useTmux = true
-		}
-	}
-
-	if !useTmux {
-		return fmt.Errorf("agent '%s' (grove: %s) does not appear to have tmux support enabled, which is required for interactive attach with the 'container' runtime", id, agent.Grove)
-	}
-
-	args := []string{"exec", "-it", id, "tmux", "attach", "-t", "scion"}
-
-	return runInteractiveCommand(r.Command, args...)
+	return runInteractiveCommand(r.Command, "attach", id)
 }
 
 func (r *AppleContainerRuntime) ImageExists(ctx context.Context, image string) (bool, error) {

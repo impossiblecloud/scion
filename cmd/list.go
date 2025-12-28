@@ -91,7 +91,7 @@ var listCmd = &cobra.Command{
 				}
 				var cfg api.ScionConfig
 				if err := json.Unmarshal(data, &cfg); err == nil && cfg.Agent != nil {
-					agents = append(agents, runtime.AgentInfo{
+					agents = append(agents, api.AgentInfo{
 						Name:      e.Name(),
 						Template:  cfg.Template,
 						Grove:     groveName,
@@ -115,20 +115,20 @@ var listCmd = &cobra.Command{
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tTEMPLATE\tGROVE\tAGENT STATUS\tCONTAINER")
 		for _, a := range agents {
-			agentStatus := "unknown"
-			if a.GrovePath != "" {
-				// agent home: <GrovePath>/agents/<AgentName>/home/scion.json
+			agentStatus := a.AgentStatus
+			if agentStatus == "" && a.GrovePath != "" {
+				// fallback to agent home: <GrovePath>/agents/<AgentName>/home/scion.json
 				agentScionJSON := filepath.Join(a.GrovePath, "agents", a.Name, "home", "scion.json")
 				data, err := os.ReadFile(agentScionJSON)
 				if err == nil {
 					var cfg api.ScionConfig
 					if err := json.Unmarshal(data, &cfg); err == nil && cfg.Agent != nil {
 						agentStatus = cfg.Agent.Status
-						if agentStatus == "" {
-							agentStatus = "IDLE"
-						}
 					}
 				}
+			}
+			if agentStatus == "" {
+				agentStatus = "IDLE"
 			}
 			containerStatus := a.Status
 			if containerStatus == "created" && a.ID == "" {

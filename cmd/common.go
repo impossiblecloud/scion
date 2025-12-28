@@ -240,7 +240,9 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	if err == nil {
 		for _, a := range agents {
 			if a.ID == agentName || a.Name == agentName {
-				isRunning := strings.Contains(a.Status, "Up") || strings.Contains(a.Status, "running")
+				// Improved check: Status should start with "Up" (Docker) or be exactly "Running" (K8s)
+				// We want to exclude "Running (Completed)" or similar terminal states.
+				isRunning := (strings.HasPrefix(a.Status, "Up") || a.Status == "Running")
 				if isRunning {
 					fmt.Printf("Agent container '%s' is already running.\n", agentName)
 					if attach {
@@ -398,7 +400,7 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		repoRoot, _ = util.RepoRoot()
 	}
 
-	runCfg := runtime.RunConfig{
+	runCfg := api.RunConfig{
 		Name:         agentName,
 		Template:     template,
 		UnixUsername: unixUsername,
@@ -420,13 +422,14 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		}(),
 		Resume: resume,
 		Labels: map[string]string{
-			"scion.agent":      "true",
-			"scion.name":       agentName,
-			"scion.grove":      groveName,
+			"scion.agent": "true",
+			"scion.name":  agentName,
+			"scion.grove": groveName,
+		},
+		Annotations: map[string]string{
 			"scion.grove_path": projectDir,
 		},
 	}
-
 	id, err := rt.Run(context.Background(), runCfg)
 	if err != nil {
 		return fmt.Errorf("failed to launch container: %w", err)
@@ -500,7 +503,10 @@ func GetAgent(agentName string, templateName string, agentImage string, grovePat
 	agentWorkspace := filepath.Join(agentDir, "workspace")
 
 	// Load settings for default template
-	settings, _ := config.LoadSettings(projectDir)
+	settings, err := config.LoadSettings(projectDir)
+	if err != nil {
+		fmt.Printf("Warning: failed to load settings: %v\n", err)
+	}
 	defaultTemplate := "gemini"
 	if settings != nil && settings.DefaultTemplate != "" {
 		defaultTemplate = settings.DefaultTemplate

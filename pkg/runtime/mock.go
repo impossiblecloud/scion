@@ -2,80 +2,66 @@ package runtime
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/ptone/scion-agent/pkg/api"
 )
 
 type MockRuntime struct {
-	Agents map[string]AgentInfo
+	RunFunc         func(ctx context.Context, config api.RunConfig) (string, error)
+	StopFunc        func(ctx context.Context, id string) error
+	DeleteFunc      func(ctx context.Context, id string) error
+	ListFunc        func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error)
+	GetLogsFunc     func(ctx context.Context, id string) (string, error)
+	AttachFunc      func(ctx context.Context, id string) error
+	ImageExistsFunc func(ctx context.Context, image string) (bool, error)
 }
 
-func NewMockRuntime() *MockRuntime {
-	return &MockRuntime{
-		Agents: make(map[string]AgentInfo),
+func (m *MockRuntime) Run(ctx context.Context, config api.RunConfig) (string, error) {
+	if m.RunFunc != nil {
+		return m.RunFunc(ctx, config)
 	}
-}
-
-func (m *MockRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
-	id := fmt.Sprintf("id-%s", config.Name)
-	m.Agents[id] = AgentInfo{
-		ID:          id,
-		Name:        config.Name,
-		Status:      "Running",
-		AgentStatus: "IDLE",
-		Image:       config.Image,
-	}
-	return id, nil
+	return "mock-id", nil
 }
 
 func (m *MockRuntime) Stop(ctx context.Context, id string) error {
-	agent, ok := m.Agents[id]
-	if !ok {
-		return fmt.Errorf("agent not found")
+	if m.StopFunc != nil {
+		return m.StopFunc(ctx, id)
 	}
-	agent.Status = "Stopped"
-	m.Agents[id] = agent
 	return nil
 }
 
 func (m *MockRuntime) Delete(ctx context.Context, id string) error {
-	if _, ok := m.Agents[id]; !ok {
-		return fmt.Errorf("agent not found")
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
 	}
-	delete(m.Agents, id)
 	return nil
 }
 
-func (m *MockRuntime) List(ctx context.Context, labelFilter map[string]string) ([]AgentInfo, error) {
-	var list []AgentInfo
-	for _, a := range m.Agents {
-		list = append(list, a)
+func (m *MockRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, labelFilter)
 	}
-	return list, nil
+	return []api.AgentInfo{}, nil
 }
 
 func (m *MockRuntime) GetLogs(ctx context.Context, id string) (string, error) {
+	if m.GetLogsFunc != nil {
+		return m.GetLogsFunc(ctx, id)
+	}
 	return "mock logs", nil
 }
 
 func (m *MockRuntime) Attach(ctx context.Context, id string) error {
-	if _, ok := m.Agents[id]; !ok {
-		// Also check by name
-		found := false
-		for _, a := range m.Agents {
-			if a.Name == id {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("agent '%s' not found", id)
-		}
+	if m.AttachFunc != nil {
+		return m.AttachFunc(ctx, id)
 	}
-	fmt.Printf("Mock: Attaching to %s\n", id)
 	return nil
 }
 
 func (m *MockRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
+	if m.ImageExistsFunc != nil {
+		return m.ImageExistsFunc(ctx, image)
+	}
 	return true, nil
 }
 

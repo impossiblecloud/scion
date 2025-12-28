@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/ptone/scion-agent/pkg/api"
 )
 
 type DockerRuntime struct {
@@ -13,10 +15,12 @@ type DockerRuntime struct {
 }
 
 func NewDockerRuntime() *DockerRuntime {
-	return &DockerRuntime{Command: "docker"}
+	return &DockerRuntime{
+		Command: "docker",
+	}
 }
 
-func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
+func (r *DockerRuntime) Run(ctx context.Context, config api.RunConfig) (string, error) {
 	args, err := buildCommonRunArgs(config)
 	if err != nil {
 		return "", err
@@ -29,9 +33,10 @@ func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 
 	out, err := runSimpleCommand(ctx, r.Command, newArgs...)
 	if err != nil {
-		return "", fmt.Errorf("docker run failed: %w (output: %s)", err, out)
+		return "", fmt.Errorf("container run failed: %w (output: %s)", err, out)
 	}
-	return out, nil
+
+	return strings.TrimSpace(out), nil
 }
 
 func (r *DockerRuntime) Stop(ctx context.Context, id string) error {
@@ -40,7 +45,7 @@ func (r *DockerRuntime) Stop(ctx context.Context, id string) error {
 }
 
 func (r *DockerRuntime) Delete(ctx context.Context, id string) error {
-	_, err := runSimpleCommand(ctx, r.Command, "rm", id)
+	_, err := runSimpleCommand(ctx, r.Command, "rm", "-f", id)
 	return err
 }
 
@@ -52,62 +57,57 @@ type dockerListOutput struct {
 	Labels string `json:"Labels"`
 }
 
-func (r *DockerRuntime) List(ctx context.Context, labelFilter map[string]string) ([]AgentInfo, error) {
+func (r *DockerRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
 	args := []string{"ps", "-a", "--no-trunc", "--format", "{{json .}}"}
 	cmd := exec.CommandContext(ctx, r.Command, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker ps failed: %w (output: %s)", err, string(out))
+		return nil, fmt.Errorf("docker ps failed: %w", err)
 	}
 
-	var agents []AgentInfo
+	var agents []api.AgentInfo
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		var data dockerListOutput
-		if err := json.Unmarshal([]byte(line), &data); err != nil {
+		var d dockerListOutput
+		if err := json.Unmarshal([]byte(line), &d); err != nil {
 			continue
 		}
 
-		// Parse Labels string "key1=val1,key2=val2"
 		labels := make(map[string]string)
-		if data.Labels != "" {
-			pairs := strings.Split(data.Labels, ",")
-			for _, pair := range pairs {
-				kv := strings.SplitN(pair, "=", 2)
-				if len(kv) == 2 {
-					labels[kv[0]] = kv[1]
-				}
+		for _, pair := range strings.Split(d.Labels, ",") {
+			parts := strings.SplitN(pair, "=", 2)
+			if len(parts) == 2 {
+				labels[parts[0]] = parts[1]
 			}
 		}
 
 		// Filter by labels if requested
-		if len(labelFilter) > 0 {
-			match := true
-			for k, v := range labelFilter {
-				if lv, ok := labels[k]; !ok || lv != v {
-					match = false
-					break
-				}
-			}
-			if !match {
-				continue
+		match := true
+		for k, v := range labelFilter {
+			if labels[k] != v {
+				match = false
+				break
 			}
 		}
 
-		agents = append(agents, AgentInfo{
-			ID:        data.ID,
-			Name:      data.Names,
-			Template:  labels["scion.template"],
-			Grove:     labels["scion.grove"],
-			GrovePath: labels["scion.grove_path"],
-			Labels:    labels,
-			Status:    data.Status,
-			Image:     data.Image,
-		})
+		if match {
+			agents = append(agents, api.AgentInfo{
+				ID:          d.ID,
+				Name:        d.Names,
+				Status:      d.Status,
+				Image:       d.Image,
+				Labels:      labels,
+				Annotations: labels,
+				Template:    labels["scion.template"],
+				Grove:       labels["scion.grove"],
+				GrovePath:   labels["scion.grove_path"],
+			})
+		}
 	}
+
 	return agents, nil
 }
 
@@ -116,9 +116,9 @@ func (r *DockerRuntime) GetLogs(ctx context.Context, id string) (string, error) 
 }
 
 func (r *DockerRuntime) Attach(ctx context.Context, id string) error {
-	// Check if the container exists and get its labels
+	// We need to find the container first to handle names properly
 	agents, err := r.List(ctx, nil)
-	var agent *AgentInfo
+	var agent *api.AgentInfo
 	if err == nil {
 		for _, a := range agents {
 			// Match by full ID, short ID (12 chars), or name (with or without leading slash)
@@ -130,18 +130,12 @@ func (r *DockerRuntime) Attach(ctx context.Context, id string) error {
 		}
 	}
 
-	if agent == nil {
-		return fmt.Errorf("agent '%s' not found", id)
+	target := id
+	if agent != nil {
+		target = agent.ID
 	}
 
-	// Check if the container is using tmux
-	useTmux := agent.Labels["scion.tmux"] == "true"
-
-	if useTmux {
-		return runInteractiveCommand(r.Command, "exec", "-it", id, "tmux", "attach", "-t", "scion")
-	} else {
-		return runInteractiveCommand(r.Command, "attach", id)
-	}
+	return runInteractiveCommand(r.Command, "attach", target)
 }
 
 func (r *DockerRuntime) ImageExists(ctx context.Context, image string) (bool, error) {

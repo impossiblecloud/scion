@@ -1,75 +1,57 @@
 package runtime
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"runtime"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
+	"github.com/ptone/scion-agent/pkg/k8s"
+	runtimek8s "github.com/ptone/scion-agent/pkg/runtime/kubernetes"
 )
 
 // GetRuntime returns the appropriate Runtime implementation based on environment,
 // agent configuration (if available via GetAgentSettings), and grove/global settings.
-func GetRuntime(grovePath string) Runtime {
-	sandbox := os.Getenv("GEMINI_SANDBOX")
-	
-	if sandbox == "" {
-		if settings, err := config.GetAgentSettings(); err == nil {
-			switch v := settings.Tools.Sandbox.(type) {
-			case string:
-				sandbox = v
-			case bool:
-				if v {
-					sandbox = "true"
-				}
-			}
-		}
+func GetRuntime(grovePath string) api.Runtime {
+	var runtimeType string
+
+	// We resolve the project dir from grovePath to load settings correctly
+	// If grovePath is empty, GetResolvedProjectDir handles it by looking for .scion or falling back to global
+	projectDir, _ := config.GetResolvedProjectDir(grovePath)
+	s, _ := config.LoadSettings(projectDir)
+	if s != nil && s.DefaultRuntime != "" {
+		runtimeType = s.DefaultRuntime
 	}
 
-	// If not set by env or agent settings, check grove/global settings
-	if sandbox == "" {
-		// We resolve the project dir from grovePath to load settings correctly
-		// If grovePath is empty, LoadSettings handles it by just loading global/defaults
-		projectDir, _ := config.GetResolvedProjectDir(grovePath)
-		if s, err := config.LoadSettings(projectDir); err == nil {
-			if s.DefaultRuntime != "" {
-				sandbox = s.DefaultRuntime
-			}
-		}
-	}
-
-	if sandbox == "local" {
+	if runtimeType == "local" {
 		if runtime.GOOS == "darwin" {
-			sandbox = "container"
+			runtimeType = "container"
 		} else {
-			sandbox = "docker"
+			runtimeType = "docker"
 		}
 	}
 
-	if sandbox == "remote" {
-		sandbox = "kubernetes"
+	if runtimeType == "remote" {
+		runtimeType = "kubernetes"
 	}
 
-	switch sandbox {
+	switch runtimeType {
 	case "container":
 		return NewAppleContainerRuntime()
 	case "docker":
 		return NewDockerRuntime()
-	case "kubernetes":
-		// TODO: Implement Kubernetes Runtime
-		// For now, fall back or panic?
-		// Since the task doesn't explicitly ask to implement the K8s runtime,
-		// I will just return DockerRuntime or similar for now, or maybe panic to indicate it's not ready.
-		// But "Create an implementation of the .design/settings.md proposal" implies enabling the config.
-		// The proposal mentions KubernetesSettings but doesn't explicitly say "Implement Kubernetes Runtime".
-		// It says "Options: docker, kubernetes".
-		// Assuming NewKubernetesRuntime doesn't exist yet based on file list (only checked pkg/runtime/runtime.go briefly).
-		// Let's assume for now we just support what's there, but handle the string.
-		// If I return nil, it might crash.
-		// I'll return NewDockerRuntime() as a placeholder if k8s is requested but not available?
-		// Or maybe I should check if NewKubernetesRuntime exists.
-		// I'll stick to what was there + using the setting.
-		return NewDockerRuntime()
+	case "kubernetes", "k8s":
+		k8sClient, err := k8s.NewClient(os.Getenv("KUBECONFIG"))
+		if err != nil {
+			return &ErrorRuntime{Err: err}
+		}
+		rt := runtimek8s.NewKubernetesRuntime(k8sClient)
+		if s != nil && s.Kubernetes.DefaultNamespace != "" {
+			rt.DefaultNamespace = s.Kubernetes.DefaultNamespace
+		}
+		return rt
 	case "true":
 		// Fall through to auto-detection
 	}
@@ -87,4 +69,40 @@ func GetRuntime(grovePath string) Runtime {
 
 	// Default return - the caller will handle the error if the binary is missing
 	return NewAppleContainerRuntime()
+}
+
+type ErrorRuntime struct {
+	Err error
+}
+
+func (e *ErrorRuntime) Run(ctx context.Context, config api.RunConfig) (string, error) {
+	return "", e.Err
+}
+
+func (e *ErrorRuntime) Stop(ctx context.Context, id string) error {
+	return e.Err
+}
+
+func (e *ErrorRuntime) Delete(ctx context.Context, id string) error {
+	return e.Err
+}
+
+func (e *ErrorRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+	return nil, e.Err
+}
+
+func (e *ErrorRuntime) GetLogs(ctx context.Context, id string) (string, error) {
+	return "", e.Err
+}
+
+func (e *ErrorRuntime) Attach(ctx context.Context, id string) error {
+	return e.Err
+}
+
+func (e *ErrorRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
+	return false, e.Err
+}
+
+func (e *ErrorRuntime) PullImage(ctx context.Context, image string) error {
+	return e.Err
 }

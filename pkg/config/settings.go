@@ -45,13 +45,15 @@ func LoadSettings(grovePath string) (*Settings, error) {
 		}
 	}
 
-	// 3. Merge Grove (.scion/settings.json)
+	// 3. Merge Grove settings
 	if grovePath != "" {
-		groveSettingsPath := filepath.Join(grovePath, ".scion", "settings.json")
+		// grovePath already points to the .scion directory (or equivalent)
+		// We expect settings.json to be directly inside it.
+		groveSettingsPath := filepath.Join(grovePath, "settings.json")
 
 		if err := mergeSettingsFromFile(settings, groveSettingsPath); err != nil {
 			if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("failed to load grove settings: %w", err)
+				return nil, fmt.Errorf("failed to load grove settings at %s: %w", groveSettingsPath, err)
 			}
 		}
 	}
@@ -105,7 +107,7 @@ func SaveSettings(grovePath string, settings *Settings, global bool) error {
 		if grovePath == "" {
 			return fmt.Errorf("grove path required for local settings")
 		}
-		targetPath = filepath.Join(grovePath, ".scion", "settings.json")
+		targetPath = filepath.Join(grovePath, "settings.json")
 	}
 
 	dir := filepath.Dir(targetPath)
@@ -134,7 +136,7 @@ func UpdateSetting(grovePath string, key string, value string, global bool) erro
 		if grovePath == "" {
 			return fmt.Errorf("grove path required for local settings")
 		}
-		targetPath = filepath.Join(grovePath, ".scion", "settings.json")
+		targetPath = filepath.Join(grovePath, "settings.json")
 	}
 
 	// Load existing file specifically (not merged)

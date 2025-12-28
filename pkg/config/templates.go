@@ -31,6 +31,27 @@ func (t *Template) LoadConfig() (*api.ScionConfig, error) {
 	return &cfg, nil
 }
 
+func LoadProjectKubernetesConfig() (*api.KubernetesConfig, error) {
+	path, err := GetProjectKubernetesConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var cfg api.KubernetesConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 func FindTemplate(name string) (*Template, error) {
 	// 0. Check if name is an absolute path
 	if filepath.IsAbs(name) {
@@ -233,6 +254,27 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 	if override.Model != "" {
 		result.Model = override.Model
 	}
+	if override.Runtime != "" {
+		result.Runtime = override.Runtime
+	}
+	if override.Kubernetes != nil {
+		if result.Kubernetes == nil {
+			result.Kubernetes = override.Kubernetes
+		} else {
+			if override.Kubernetes.Context != "" {
+				result.Kubernetes.Context = override.Kubernetes.Context
+			}
+			if override.Kubernetes.Namespace != "" {
+				result.Kubernetes.Namespace = override.Kubernetes.Namespace
+			}
+			if override.Kubernetes.RuntimeClassName != "" {
+				result.Kubernetes.RuntimeClassName = override.Kubernetes.RuntimeClassName
+			}
+			if override.Kubernetes.Resources != nil {
+				result.Kubernetes.Resources = override.Kubernetes.Resources
+			}
+		}
+	}
 	if override.Agent != nil {
 		if result.Agent == nil {
 			agentCopy := *override.Agent
@@ -248,10 +290,12 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 			if override.Agent.Status != "" {
 				agentCopy.Status = override.Agent.Status
 			}
+			if override.Agent.Kubernetes != nil {
+				agentCopy.Kubernetes = override.Agent.Kubernetes
+			}
 			result.Agent = &agentCopy
 		}
 	}
 
 	return &result
 }
-

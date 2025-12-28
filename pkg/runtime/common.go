@@ -12,7 +12,7 @@ import (
 )
 
 // buildCommonRunArgs constructs the common arguments for 'run' command across different runtimes.
-func buildCommonRunArgs(config RunConfig) ([]string, error) {
+func buildCommonRunArgs(config api.RunConfig) ([]string, error) {
 	args := []string{"run", "-d", "-i"}
 	addArg := func(flag string, values ...string) {
 		for _, v := range values {
@@ -91,6 +91,9 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	for k, v := range config.Labels {
 		addArg("--label", fmt.Sprintf("%s=%s", k, v))
 	}
+	for k, v := range config.Annotations {
+		addArg("--label", fmt.Sprintf("%s=%s", k, v))
+	}
 	if config.Template != "" {
 		addArg("--label", fmt.Sprintf("scion.template=%s", config.Template))
 	}
@@ -112,7 +115,7 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 		var quotedArgs []string
 		for _, a := range harnessArgs {
 			// Use %q to quote arguments that might have spaces or special characters
-			if strings.ContainsAny(a, " \t\n\"'\\$") {
+			if strings.ContainsAny(a, " \t\n\"'$") {
 				quotedArgs = append(quotedArgs, fmt.Sprintf("%q", a))
 			} else {
 				quotedArgs = append(quotedArgs, a)

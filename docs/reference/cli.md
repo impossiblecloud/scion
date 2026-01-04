@@ -1,0 +1,82 @@
+# Scion CLI Reference
+
+## `scion start` (or `run`)
+
+Starts a new agent or resumes an existing one.
+
+**Usage:** `scion start <agent-name> [task] [flags]`
+
+- **Arguments:**
+    - `<agent-name>`: Unique name for the agent instance.
+    - `[task]`: (Optional) The initial instruction/task for the agent.
+- **Flags:**
+    - `-t, --type <string>`: Template to use (default "gemini").
+    - `-i, --image <string>`: Override container image.
+    - `-a, --attach`: Attach to the agent immediately after starting.
+    - `--no-auth`: Disable authentication propagation.
+    - `-d, --detached`: Run in detached mode (default true).
+
+## `scion stop`
+
+Stops a running agent.
+
+**Usage:** `scion stop <agent-name>`
+
+## `scion resume`
+
+Resumes a stopped agent.
+
+**Usage:** `scion resume <agent-name> [flags]`
+
+- **Flags:**
+    - `-a, --attach`: Attach to the agent immediately.
+
+## `scion attach`
+
+Connects to the interactive session of a running agent.
+
+**Usage:** `scion attach <agent-name>`
+
+- **Key Bindings:**
+    - `Ctrl+P, Ctrl+Q`: Detach from the session without stopping the agent.
+
+## `scion logs`
+
+Displays the logs of an agent.
+
+**Usage:** `scion logs <agent-name> [flags]`
+
+- **Flags:**
+    - `-f, --follow`: Stream logs.
+
+## `scion list` (or `ps`)
+
+Lists all agents and their status.
+
+**Usage:** `scion list [flags]`
+
+- **Flags:**
+    - `-a, --all`: Show all agents (including stopped ones).
+
+## `scion delete` (or `rm`)
+
+Deletes an agent, removing its container, home directory, and worktree.
+
+**Usage:** `scion delete <agent-name>`
+
+## `scion grove`
+
+Manages the Scion workspace (Grove).
+
+- `scion grove init`: Initialize a new grove in the current directory.
+
+## `scion templates`
+
+Manages agent templates.
+
+- `list`: List available templates.
+- `show <name>`: Show configuration of a template.
+- `create <name> [--harness <type>]`: Create a new template.
+- `clone <src> <dest>`: Clone a template.
+- `delete <name>`: Delete a template.
+- `update-default`: Update default templates from the binary.

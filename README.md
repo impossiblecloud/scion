@@ -7,8 +7,18 @@ Scion is a container-based orchestration tool designed to manage concurrent LLM-
 - **Parallelism**: Run multiple agents concurrently as independent processes either locally or remote.
 - **Isolation**: Each agent runs in its own container with strict separation of credentials, configuration, and environment.
 - **Context Management**: Scion uses `git worktree` to provide each agent with a dedicated workspace, preventing merge conflicts and ensuring clean separation of concerns.
-- **Specialization**: Agents can be customized via templates (e.g., "Security Auditor", "QA Tester") to perform specific roles.
+- **Specialization**: Agents can be customized via [Templates](docs/guides/templates.md) (e.g., "Security Auditor", "QA Tester") to perform specific roles.
 - **Interactivity**: Agents support "detached" background operation, but users can "attach" to any running agent for human-in-the-loop interaction.
+- **Multi-Runtime**: Supports Docker, Apple Virtualization Framework, and (Experimental) Kubernetes.
+
+## Documentation
+
+- **[Concepts](docs/concepts.md)**: Understanding Agents, Groves, Harnesses, and Runtimes.
+- **[CLI Reference](docs/reference/cli.md)**: Comprehensive guide to all Scion commands.
+- **[Configuration Reference](docs/scion-config-reference.md)**: Detailed `scion-agent.json` options.
+- **Guides**:
+    - [Using Templates](docs/guides/templates.md)
+    - [Kubernetes Runtime](docs/guides/kubernetes.md)
 
 ## Installation
 
@@ -19,27 +29,6 @@ go install github.com/ptone/scion-agent@latest
 ```
 
 Ensure that your `$GOPATH/bin` is in your system `$PATH`.
-
-## Core Concepts
-
-- **Agent**: An isolated container running an LLM-driven task. It acts as an independent worker with its own identity, credentials, and workspace.
-- **Grove**: A project workspace where agents live. It corresponds to a `.scion` directory on the filesystem (usually at the root of a git repository).
-- **Harness**: Adapts a specific underlying LLM tool (like Gemini CLI or Claude Code) into the Scion ecosystem, handling provisioning and execution inside a container.
-- **Template**: A blueprint for an agent, defining its base configuration, system prompt, and tools.
-- **Runtime**: The infrastructure layer responsible for executing agent containers (supports Docker, Apple Container, and experimental Kubernetes).
-
-## Architecture & Workspace Strategy
-
-Scion uses **Git Worktrees** to enable multiple agents to work on the same codebase simultaneously without conflicts.
-- When an agent starts, Scion creates a new git worktree for it.
-- This worktree creates a dedicated branch for the agent, ensuring independent working directories while sharing the same repository history.
-- The worktree is mounted into the agent's container as `/workspace`.
-
-### Resource Isolation
-Each agent is provisioned with:
-- **Dedicated Filesystem**: A unique home directory containing its unique settings and history.
-- **Credential Projection**: API keys and cloud credentials (e.g., Google Application Default Credentials) are securely projected into the container.
-- **Environment**: Environment variables are explicitly projected into the container.
 
 ## Quick Start
 
@@ -73,26 +62,14 @@ scion start debug "Help me debug this error" --attach
 - **Attach to an agent**: `scion attach <agent-name>`
 - **View logs**: `scion logs <agent-name>`
 - **Stop an agent**: `scion stop <agent-name>`
+- **Resume an agent**: `scion resume <agent-name>`
 - **Delete an agent**: `scion delete <agent-name>` (removes container, directory, and worktree)
-
-### 4. Customization Workflow (Create-Then-Start)
-
-The `create` command allows you to provision an agent's directory structure without launching it, allowing for manual customization of the system prompt or tools.
-
-```bash
-scion create my-agent --type research-specialist
-# Edit files in .scion/agents/my-agent/home/
-scion start my-agent "Analyze the codebase"
-```
 
 ## Configuration
 
 Scion settings are managed in `settings.json` files, following a precedence order: **Grove** (`.scion/settings.json`) > **Global** (`~/.scion/settings.json`) > **Defaults**.
 
-Templates serve as blueprints and can be managed via the `templates` subcommand:
-- **List templates**: `scion templates list`
-- **Create a template**: `scion templates create <name>`
-- Use the `--global` flag to target the global template store in `~/.scion/templates`.
+Templates serve as blueprints and can be managed via the `templates` subcommand. See the [Templates Guide](docs/guides/templates.md) for more details.
 
 ## License
 

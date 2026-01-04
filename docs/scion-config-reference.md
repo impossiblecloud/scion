@@ -56,6 +56,28 @@ The model ID to use for the agent.
 - **Details**: This value is propagated to the agent container as an environment variable (e.g., `GEMINI_MODEL` for Gemini CLI).
 - **Example**: `"model": "pro"`
 
+### `command_args` (array of strings)
+Additional arguments to pass to the agent's entrypoint command.
+- **Example**: `"command_args": ["--verbose", "--debug"]`
+
+### `kubernetes` (object)
+Configuration for running the agent in a Kubernetes cluster.
+- **Fields**:
+    - `context` (string): The kubeconfig context to use.
+    - `namespace` (string): The namespace to deploy the agent pod into.
+    - `runtimeClassName` (string): The Kubernetes RuntimeClass to use (e.g., "gvisor").
+    - `resources` (object): Resource requests and limits (cpu, memory).
+- **Example**:
+  ```json
+  "kubernetes": {
+    "namespace": "scion-agents",
+    "resources": {
+      "requests": {"cpu": "500m", "memory": "1Gi"},
+      "limits": {"cpu": "2", "memory": "4Gi"}
+    }
+  }
+  ```
+
 ### `agent` (object)
 *Internal usage*: This object is typically populated by the Scion CLI during provisioning to track instance-specific state.
 - **Fields**: `grove`, `name`, `status`.

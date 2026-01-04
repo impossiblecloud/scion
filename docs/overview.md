@@ -10,20 +10,6 @@ Scion is a container-based orchestration tool designed to manage concurrent LLM-
 - **Specialization**: Agents can be customized via templates (e.g., "Security Auditor", "QA Tester") to perform specific roles.
 - **Interactivity**: Agents support "detached" background operation, but users can "attach" to any running agent for human-in-the-loop interaction.
 
-## Architecture
-
-Scion follows a Manager-Worker architecture:
-
-- **scion**: A host-side CLI that orchestrates the lifecycle of agents. It manages the "Grove" (the project workspace).
-- **Agents**: Isolated runtime containers (e.g., Docker) running the agent software (like Gemini CLI or Claude Code).
-
-### Resource Isolation
-
-Each agent is provisioned with:
-- **Dedicated Filesystem**: A unique home directory and workspace.
-- **Network Isolation**: Agents share a bridge network but are otherwise isolated.
-- **Credential Projection**: API keys and cloud credentials (e.g., Google Application Default Credentials) are securely projected into the container.
-
 ## Getting Started
 
 Scion is designed to be easy to start with.
@@ -31,3 +17,11 @@ Scion is designed to be easy to start with.
 1.  **Initialize**: Run `scion grove init` in your project root to create a `.scion` directory.
 2.  **Start an Agent**: Use `scion start <agent-name> "<task>"` to launch an agent.
 3.  **Interact**: Use `scion attach <agent-name>` to interact with the agent's session, or `scion logs <agent-name>` to view its output.
+4.  **Resume**: Use `scion resume <agent-name>` to restart a stopped agent, preserving its state.
+
+## Architecture
+
+Scion follows a Manager-Worker architecture:
+
+- **scion**: A host-side CLI that orchestrates the lifecycle of agents. It manages the "Grove" (the project workspace) and provides tools for template management (`scion templates`).
+- **Agents**: Isolated runtime containers (e.g., Docker) running the agent software (like Gemini CLI or Claude Code).

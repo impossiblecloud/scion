@@ -12,13 +12,14 @@ A **Grove** (or **Group**) is a project workspace where agents live. It correspo
 
 ### Harness
 A **Harness** adapts a specific underlying LLM tool or agent software (like Gemini CLI or Claude Code) into the Scion ecosystem.
-- It handles the specifics of provisioning, configuration, and execution for that particular tool inside and OCI container.
+- It handles the specifics of provisioning, configuration, and execution for that particular tool inside an OCI container.
 - Examples: `GeminiCLI`, `ClaudeCode`.
-- The harness ensures that the generic Scion commands (`start`, `stop`, `attach`) work consistently regardless of the underlying agent software.
+- The harness ensures that the generic Scion commands (`start`, `stop`, `attach`, `resume`) work consistently regardless of the underlying agent software.
 
 ### Template
 A **Template** is a blueprint for creating an agent. It defines the base configuration, system prompt, and tools that an agent will use.
-- Templates are stored in `.scion/templates/` and can be project or global level.
+- Templates are stored in `.scion/templates/` and can be project-level or global (`~/.scion/templates/`).
+- Users can manage templates using the `scion templates` command suite (`create`, `clone`, `list`, `show`, `update-default`).
 - Scion comes with default templates for supported harnesses (e.g., `gemini`, `claude`), but users can create custom templates for specialized roles (e.g., "Security Auditor", "React Specialist").
 
 
@@ -26,8 +27,8 @@ A **Template** is a blueprint for creating an agent. It defines the base configu
 The **Runtime** is the infrastructure layer responsible for executing the agent containers.
 - Scion abstracts the container execution, allowing it to support different backends.
 - **Docker**: The standard runtime for Linux and macOS.
-- **Apple Container**: Uses the native Virtualization Framework on macOS.
-- **Kubernetes**: (Experimental) Allows running agents as Pods in a Kubernetes cluster.
+- **Apple Container**: Uses the native Virtualization Framework on macOS for improved performance.
+- **Kubernetes**: (Experimental) Allows running agents as Pods in a Kubernetes cluster, enabling remote execution and scaling.
 
 ## Detailed Architecture
 

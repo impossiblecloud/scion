@@ -1,0 +1,76 @@
+# Scion Templates Guide
+
+Templates are the blueprint for your agents. They define the environment, configuration, and tools that an agent will have when it starts. This guide explains how to manage and use templates effectively.
+
+## What is a Template?
+
+A template in Scion is a directory containing configuration files that are copied to an agent's home directory upon creation. It typically includes:
+
+- `scion-agent.json`: The core configuration file.
+- `system_prompt.md`: Instructions for the LLM.
+- `settings.json`: Harness-specific settings (e.g., tools, allowlists).
+- `.bashrc`: Shell customization for the agent.
+
+## Managing Templates
+
+Scion provides a suite of commands to manage templates.
+
+### Listing Templates
+
+To see available templates (both project-specific and global):
+
+```bash
+scion templates list
+```
+
+### creating a New Template
+
+To create a new template, specify a name and optionally the harness type (default is `gemini`):
+
+```bash
+# Create a Gemini-based template
+scion templates create security-auditor
+
+# Create a Claude-based template
+scion templates create react-expert --harness claude
+```
+
+This creates a new directory in `.scion/templates/security-auditor/` populated with default files.
+
+### Customizing a Template
+
+Navigate to `.scion/templates/<template-name>/` and edit the files.
+
+- **Modify `system_prompt.md`**: Give the agent a specific persona and set of instructions.
+- **Edit `scion-agent.json`**: Change environment variables, mounting volumes, or set the model.
+- **Update `settings.json`**: Configure tools and permissions specific to the harness.
+
+### Cloning a Template
+
+You can clone an existing template to use as a starting point:
+
+```bash
+scion templates clone security-auditor security-auditor-v2
+```
+
+### Global vs. Project Templates
+
+- **Project Templates**: Stored in `.scion/templates/` within your project. Shared with the team via git.
+- **Global Templates**: Stored in `~/.scion/templates/`. Available across all your projects.
+
+Use the `--global` flag to operate on global templates:
+
+```bash
+scion templates list --global
+scion templates create my-global-agent --global
+```
+
+## Using Templates
+
+When starting an agent, specify the template using the `--type` or `-t` flag:
+
+```bash
+scion start auditor "Audit the login flow" --type security-auditor
+```
+
+If no type is specified, Scion defaults to the `gemini` template (if available) or the first available template.

@@ -22,64 +22,48 @@ func (g *GeminiCLI) Name() string {
 func (g *GeminiCLI) DiscoverAuth(agentHome string) api.AuthConfig {
 	auth := api.AuthConfig{
 		GoogleAppCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		GoogleCloudProject:   os.Getenv("GOOGLE_CLOUD_PROJECT"),
-	}
-
-	if auth.GoogleCloudProject == "" {
-		auth.GoogleCloudProject = os.Getenv("GCP_PROJECT")
+		GoogleCloudProject:   util.FirstNonEmpty(os.Getenv("GOOGLE_CLOUD_PROJECT"), os.Getenv("GCP_PROJECT")),
 	}
 
 	home, _ := os.UserHomeDir()
 
 	// 1. Check scion-agent.json for overrides
 	selectedType := ""
-	agentDir := filepath.Dir(agentHome)
-	scionAgentPath := filepath.Join(agentDir, "scion-agent.json")
+	scionAgentPath := filepath.Join(filepath.Dir(agentHome), "scion-agent.json")
 	if data, err := os.ReadFile(scionAgentPath); err == nil {
 		var cfg api.ScionConfig
 		if err := json.Unmarshal(data, &cfg); err == nil {
-			if cfg.Gemini != nil && cfg.Gemini.AuthSelectedType != "" {
+			if cfg.Gemini != nil {
 				selectedType = cfg.Gemini.AuthSelectedType
 			}
 		}
 	}
 
-	// 2. Check agent settings (from template/provision) if not found in scion-agent.json
+	// 2. Check agent settings
 	agentSettingsPath := filepath.Join(agentHome, g.DefaultConfigDir(), "settings.json")
-	if selectedType == "" {
-		if agentSettings, err := config.LoadAgentSettings(agentSettingsPath); err == nil {
+	if agentSettings, err := config.LoadAgentSettings(agentSettingsPath); err == nil {
+		if selectedType == "" {
 			selectedType = agentSettings.Security.Auth.SelectedType
-			// We can fallback to keys stored in settings.json if env vars are empty
-			// But careful not to overwrite if we already have one from env
-			if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" && agentSettings.ApiKey != "" {
-				auth.GeminiAPIKey = agentSettings.ApiKey
-			}
 		}
-	} else {
-		// Even if we found selectedType in scion-agent.json, we might still want to load key from settings.json
-		// if we need it for fallback
-		if agentSettings, err := config.LoadAgentSettings(agentSettingsPath); err == nil {
-			if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" && agentSettings.ApiKey != "" {
-				auth.GeminiAPIKey = agentSettings.ApiKey
-			}
+		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" {
+			auth.GeminiAPIKey = agentSettings.ApiKey
 		}
 	}
 
-	// 3. Load host settings if we don't have a type yet
+	// 3. Load host settings for fallbacks
 	hostSettings, _ := config.GetAgentSettings()
-
-	if selectedType == "" && hostSettings != nil {
-		selectedType = hostSettings.Security.Auth.SelectedType
+	if hostSettings != nil {
+		if selectedType == "" {
+			selectedType = hostSettings.Security.Auth.SelectedType
+		}
+		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" {
+			auth.GeminiAPIKey = hostSettings.ApiKey
+		}
 	}
 
-	// 4. Populate auth based on selected type
 	auth.SelectedType = selectedType
 
 	switch selectedType {
-	case "gemini-api-key":
-		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" && hostSettings != nil && hostSettings.ApiKey != "" {
-			auth.GeminiAPIKey = hostSettings.ApiKey
-		}
 	case "oauth-personal":
 		oauthPath := filepath.Join(home, g.DefaultConfigDir(), "oauth_creds.json")
 		if _, err := os.Stat(oauthPath); err == nil {
@@ -87,12 +71,6 @@ func (g *GeminiCLI) DiscoverAuth(agentHome string) api.AuthConfig {
 		}
 	case "vertex-ai":
 		// Vertex might need project/location from env (already loaded) or settings
-		// but currently we only support env for project/location in DiscoverAuth
-	default:
-		// Fallback for backward compatibility or undefined type: try key
-		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" && hostSettings != nil && hostSettings.ApiKey != "" {
-			auth.GeminiAPIKey = hostSettings.ApiKey
-		}
 	}
 
 	return auth
@@ -169,38 +147,9 @@ func (g *GeminiCLI) PropagateFiles(homeDir, unixUsername string, auth api.AuthCo
 	}
 
 	if auth.SelectedType != "" {
-		// Update ~/.gemini/settings.json to match selected type
 		geminiSettingsPath := filepath.Join(homeDir, g.DefaultConfigDir(), "settings.json")
-		var agentSettings map[string]interface{}
-		sData, err := os.ReadFile(geminiSettingsPath)
-		if err == nil {
-			_ = json.Unmarshal(sData, &agentSettings)
-		}
-		if agentSettings == nil {
-			agentSettings = make(map[string]interface{})
-		}
-
-		if _, ok := agentSettings["security"]; !ok {
-			agentSettings["security"] = make(map[string]interface{})
-		}
-		sec := agentSettings["security"].(map[string]interface{})
-
-		if _, ok := sec["auth"]; !ok {
-			sec["auth"] = make(map[string]interface{})
-		}
-		authMap := sec["auth"].(map[string]interface{})
-
-		currentType, _ := authMap["selectedType"].(string)
-
-		if currentType != auth.SelectedType {
-			authMap["selectedType"] = auth.SelectedType
-			sData, _ = json.MarshalIndent(agentSettings, "", "  ")
-			if err := os.MkdirAll(filepath.Dir(geminiSettingsPath), 0755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(geminiSettingsPath, sData, 0644); err != nil {
-				return fmt.Errorf("failed to update gemini settings: %w", err)
-			}
+		if err := g.updateSelectedAuthType(geminiSettingsPath, auth.SelectedType); err != nil {
+			return fmt.Errorf("failed to update gemini settings: %w", err)
 		}
 	}
 
@@ -284,39 +233,12 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 		selectedType = cfg.Gemini.AuthSelectedType
 	}
 
-	if selectedType == "" {
-		return nil
-	}
-
-	// Update ~/.gemini/settings.json
-	geminiSettingsPath := filepath.Join(agentHome, g.DefaultConfigDir(), "settings.json")
-	var agentSettings map[string]interface{}
-	sData, err := os.ReadFile(geminiSettingsPath)
-	if err == nil {
-		_ = json.Unmarshal(sData, &agentSettings)
-	}
-	if agentSettings == nil {
-		agentSettings = make(map[string]interface{})
-	}
-
-	if _, ok := agentSettings["security"]; !ok {
-		agentSettings["security"] = make(map[string]interface{})
-	}
-	sec := agentSettings["security"].(map[string]interface{})
-
-	if _, ok := sec["auth"]; !ok {
-		sec["auth"] = make(map[string]interface{})
-	}
-	auth := sec["auth"].(map[string]interface{})
-
-	auth["selectedType"] = selectedType
-
-	sData, _ = json.MarshalIndent(agentSettings, "", "  ")
-	if err := os.MkdirAll(filepath.Dir(geminiSettingsPath), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(geminiSettingsPath, sData, 0644); err != nil {
-		return fmt.Errorf("failed to update gemini settings: %w", err)
+	if selectedType != "" {
+		// Update ~/.gemini/settings.json
+		geminiSettingsPath := filepath.Join(agentHome, g.DefaultConfigDir(), "settings.json")
+		if err := g.updateSelectedAuthType(geminiSettingsPath, selectedType); err != nil {
+			return fmt.Errorf("failed to update gemini settings: %w", err)
+		}
 	}
 
 	// Update scion-agent.json
@@ -366,6 +288,41 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 	}
 
 	return nil
+}
+
+func (g *GeminiCLI) updateSelectedAuthType(settingsPath string, selectedType string) error {
+	var settings map[string]interface{}
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		_ = json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]interface{})
+	}
+
+	if _, ok := settings["security"]; !ok {
+		settings["security"] = make(map[string]interface{})
+	}
+	sec := settings["security"].(map[string]interface{})
+
+	if _, ok := sec["auth"]; !ok {
+		sec["auth"] = make(map[string]interface{})
+	}
+	auth := sec["auth"].(map[string]interface{})
+
+	if current, _ := auth["selectedType"].(string); current == selectedType {
+		return nil
+	}
+
+	auth["selectedType"] = selectedType
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, data, 0644)
 }
 
 func (g *GeminiCLI) GetEmbedDir() string {

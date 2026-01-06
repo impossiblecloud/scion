@@ -19,10 +19,6 @@ func (g *Generic) Name() string {
 
 func (g *Generic) DiscoverAuth(agentHome string) api.AuthConfig {
 	auth := api.AuthConfig{
-		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
-		GoogleAPIKey:         os.Getenv("GOOGLE_API_KEY"),
-		VertexAPIKey:         os.Getenv("VERTEX_API_KEY"),
-		AnthropicAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
 		GoogleAppCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:   os.Getenv("GOOGLE_CLOUD_PROJECT"),
 	}

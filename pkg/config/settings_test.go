@@ -170,155 +170,82 @@ func TestResolve(t *testing.T) {
 }
 
 func TestEnvMerging(t *testing.T) {
-
-		s := &Settings{
-
-			Harnesses: map[string]HarnessConfig{
-
-				"gemini": {
-
-					Env: map[string]string{
-
-						"H1": "V1",
-
-						"H2": "V2",
-
-					},
-
+	s := &Settings{
+		Harnesses: map[string]HarnessConfig{
+			"gemini": {
+				Env: map[string]string{
+					"H1": "V1",
+					"H2": "V2",
 				},
-
 			},
-
-			Profiles: map[string]ProfileConfig{
-
-				"dev": {
-
-					Env: map[string]string{
-
-						"H2": "P2", // Overrides harness
-
-						"P1": "PV1",
-
-					},
-
-					HarnessOverrides: map[string]HarnessOverride{
-
-						"gemini": {
-
-							Env: map[string]string{
-
-								"P1": "PH1", // Overrides profile
-
-								"O1": "OV1",
-
-							},
-
+		},
+		Profiles: map[string]ProfileConfig{
+			"dev": {
+				Env: map[string]string{
+					"H2": "P2", // Overrides harness
+					"P1": "PV1",
+				},
+				HarnessOverrides: map[string]HarnessOverride{
+					"gemini": {
+						Env: map[string]string{
+							"P1": "PH1", // Overrides profile
+							"O1": "OV1",
 						},
-
 					},
-
 				},
-
 			},
-
-		}
-
-	
-
-		h, err := s.ResolveHarness("dev", "gemini")
-
-		if err != nil {
-
-			t.Fatal(err)
-
-		}
-
-	
-
-		expected := map[string]string{
-
-			"H1": "V1",  // From harness base
-
-			"H2": "P2",  // Harness base, overridden by profile root
-
-			"P1": "PH1", // Profile root, overridden by harness override
-
-			"O1": "OV1", // From harness override
-
-		}
-
-	
-
-		if len(h.Env) != len(expected) {
-
-			t.Errorf("expected %d env vars, got %d", len(expected), len(h.Env))
-
-		}
-
-	
-
-		for k, v := range expected {
-
-			if h.Env[k] != v {
-
-				t.Errorf("expected %s=%s, got %s", k, v, h.Env[k])
-
-			}
-
-		}
-
+		},
 	}
 
-	
+	h, err := s.ResolveHarness("dev", "gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	func TestMergeSettingsEnv(t *testing.T) {
+	expected := map[string]string{
+		"H1": "V1",  // From harness base
+		"H2": "P2",  // Harness base, overridden by profile root
+		"P1": "PH1", // Profile root, overridden by harness override
+		"O1": "OV1", // From harness override
+	}
 
-		base := &Settings{
+	if len(h.Env) != len(expected) {
+		t.Errorf("expected %d env vars, got %d", len(expected), len(h.Env))
+	}
 
-			Harnesses: map[string]HarnessConfig{
-
-				"gemini": {
-
-					Env: map[string]string{"A": "1", "B": "2"},
-
-				},
-
-			},
-
-		}
-
-		overrideJSON := `{
-
-			"harnesses": {
-
-				"gemini": {
-
-					"env": {"B": "3", "C": "4"}
-
-				}
-
-			}
-
-		}`
-
-	
-
-		err := MergeSettings(base, []byte(overrideJSON))
-
-		if err != nil {
-
-			t.Fatal(err)
-
-		}
-
-	
-
-		env := base.Harnesses["gemini"].Env
-
-		if env["A"] != "1" || env["B"] != "3" || env["C"] != "4" {
-			t.Errorf("unexpected env after merge: %v", env)
+	for k, v := range expected {
+		if h.Env[k] != v {
+			t.Errorf("expected %s=%s, got %s", k, v, h.Env[k])
 		}
 	}
+}
+
+func TestMergeSettingsEnv(t *testing.T) {
+	base := &Settings{
+		Harnesses: map[string]HarnessConfig{
+			"gemini": {
+				Env: map[string]string{"A": "1", "B": "2"},
+			},
+		},
+	}
+	overrideJSON := `{
+		"harnesses": {
+			"gemini": {
+				"env": {"B": "3", "C": "4"}
+			}
+		}
+	}`
+
+	err := MergeSettings(base, []byte(overrideJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env := base.Harnesses["gemini"].Env
+	if env["A"] != "1" || env["B"] != "3" || env["C"] != "4" {
+		t.Errorf("unexpected env after merge: %v", env)
+	}
+}
 
 func TestMergeSettingsAuthSelectedType(t *testing.T) {
 	base := &Settings{
@@ -435,4 +362,41 @@ func TestVolumeMerging(t *testing.T) {
 	}
 }
 
-	
+func TestExpansion(t *testing.T) {
+	os.Setenv("TEST_EXP_VAR", "expanded_value")
+	os.Setenv("TEST_EXP_KEY", "EXP_KEY")
+	defer os.Unsetenv("TEST_EXP_VAR")
+	defer os.Unsetenv("TEST_EXP_KEY")
+
+	base := &Settings{}
+	overrideJSON := `{
+		"harnesses": {
+			"gemini": {
+				"env": {"${TEST_EXP_KEY}": "${TEST_EXP_VAR}", "NORMAL": "VAL"},
+				"volumes": [
+					{ "source": "${TEST_EXP_VAR}/src", "target": "/dest" }
+				]
+			}
+		}
+	}`
+
+	err := MergeSettings(base, []byte(overrideJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := base.Harnesses["gemini"]
+	if h.Env["EXP_KEY"] != "expanded_value" {
+		t.Errorf("expected Env[EXP_KEY]=expanded_value, got %s", h.Env["EXP_KEY"])
+	}
+	if h.Env["NORMAL"] != "VAL" {
+		t.Errorf("expected Env[NORMAL]=VAL, got %s", h.Env["NORMAL"])
+	}
+
+	if len(h.Volumes) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(h.Volumes))
+	}
+	if h.Volumes[0].Source != "expanded_value/src" {
+		t.Errorf("expected volume source 'expanded_value/src', got %s", h.Volumes[0].Source)
+	}
+}

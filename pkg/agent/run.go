@@ -248,15 +248,15 @@ func buildAgentEnv(scionCfg *api.ScionConfig, extraEnv map[string]string) []stri
 	agentEnv := []string{}
 	if scionCfg != nil && scionCfg.Env != nil {
 		for k, v := range scionCfg.Env {
-			if v == "" {
-				// Inherit from host environment
-				if hostVal, exists := os.LookupEnv(k); exists {
-					v = hostVal
-				} else {
-					fmt.Fprintf(os.Stderr, "Warning: environment variable %q is defined in settings/config but has no value in host environment.\n", k)
-				}
+			// Support variable substitution in keys and values
+			expandedKey := util.ExpandEnv(k)
+			expandedValue := util.ExpandEnv(v)
+
+			if expandedKey == "" {
+				continue
 			}
-			agentEnv = append(agentEnv, fmt.Sprintf("%s=%s", k, v))
+
+			agentEnv = append(agentEnv, fmt.Sprintf("%s=%s", expandedKey, expandedValue))
 		}
 	}
 	// Add extraEnv

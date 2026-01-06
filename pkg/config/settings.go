@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/util"
 )
 
 type RuntimeConfig struct {
@@ -190,6 +191,36 @@ func mergeSettingsFromFile(base *Settings, path string) error {
 	return MergeSettings(base, data)
 }
 
+func expandEnvMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	expanded := make(map[string]string)
+	for k, v := range m {
+		ek := util.ExpandEnv(k)
+		if ek == "" {
+			continue
+		}
+		expanded[ek] = util.ExpandEnv(v)
+	}
+	return expanded
+}
+
+func expandVolumeMounts(volumes []api.VolumeMount) []api.VolumeMount {
+	if volumes == nil {
+		return nil
+	}
+	expanded := make([]api.VolumeMount, len(volumes))
+	for i, v := range volumes {
+		expanded[i] = api.VolumeMount{
+			Source:   util.ExpandEnv(v.Source),
+			Target:   util.ExpandEnv(v.Target),
+			ReadOnly: v.ReadOnly,
+		}
+	}
+	return expanded
+}
+
 func MergeSettings(base *Settings, data []byte) error {
 	var override Settings
 	if err := json.Unmarshal(data, &override); err != nil {
@@ -222,7 +253,7 @@ func MergeSettings(base *Settings, data []byte) error {
 				existing.Tmux = v.Tmux
 			}
 			if v.Env != nil {
-				existing.Env = mergeMaps(existing.Env, v.Env)
+				existing.Env = mergeMaps(existing.Env, expandEnvMap(v.Env))
 			}
 			if v.Sync != "" {
 				existing.Sync = v.Sync
@@ -246,10 +277,10 @@ func MergeSettings(base *Settings, data []byte) error {
 				existing.AuthSelectedType = v.AuthSelectedType
 			}
 			if v.Env != nil {
-				existing.Env = mergeMaps(existing.Env, v.Env)
+				existing.Env = mergeMaps(existing.Env, expandEnvMap(v.Env))
 			}
 			if v.Volumes != nil {
-				existing.Volumes = append(existing.Volumes, v.Volumes...)
+				existing.Volumes = append(existing.Volumes, expandVolumeMounts(v.Volumes)...)
 			}
 			base.Harnesses[k] = existing
 		}
@@ -267,10 +298,10 @@ func MergeSettings(base *Settings, data []byte) error {
 				existing.Tmux = v.Tmux
 			}
 			if v.Env != nil {
-				existing.Env = mergeMaps(existing.Env, v.Env)
+				existing.Env = mergeMaps(existing.Env, expandEnvMap(v.Env))
 			}
 			if v.Volumes != nil {
-				existing.Volumes = append(existing.Volumes, v.Volumes...)
+				existing.Volumes = append(existing.Volumes, expandVolumeMounts(v.Volumes)...)
 			}
 			if v.HarnessOverrides != nil {
 				if existing.HarnessOverrides == nil {
@@ -288,10 +319,10 @@ func MergeSettings(base *Settings, data []byte) error {
 						hov.AuthSelectedType = hv.AuthSelectedType
 					}
 					if hv.Env != nil {
-						hov.Env = mergeMaps(hov.Env, hv.Env)
+						hov.Env = mergeMaps(hov.Env, expandEnvMap(hv.Env))
 					}
 					if hv.Volumes != nil {
-						hov.Volumes = append(hov.Volumes, hv.Volumes...)
+						hov.Volumes = append(hov.Volumes, expandVolumeMounts(hv.Volumes)...)
 					}
 					existing.HarnessOverrides[hk] = hov
 				}

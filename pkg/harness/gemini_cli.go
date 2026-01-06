@@ -21,9 +21,6 @@ func (g *GeminiCLI) Name() string {
 
 func (g *GeminiCLI) DiscoverAuth(agentHome string) api.AuthConfig {
 	auth := api.AuthConfig{
-		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
-		GoogleAPIKey:         os.Getenv("GOOGLE_API_KEY"),
-		VertexAPIKey:         os.Getenv("VERTEX_API_KEY"),
 		GoogleAppCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:   os.Getenv("GOOGLE_CLOUD_PROJECT"),
 	}
@@ -217,7 +214,6 @@ func (g *GeminiCLI) PropagateFiles(homeDir, unixUsername string, auth api.AuthCo
 		}
 	}
 
-
 	if auth.GoogleAppCredentials != "" {
 		dst := filepath.Join(homeDir, ".config", "gcp", "application_default_credentials.json")
 		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
@@ -331,13 +327,13 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 
 	switch selectedType {
 	case "gemini-api-key":
-		envUpdates = map[string]string{"GEMINI_API_KEY": ""}
+		envUpdates = map[string]string{"GEMINI_API_KEY": "${GEMINI_API_KEY}"}
 	case "oauth-personal":
-		envUpdates = map[string]string{"GOOGLE_CLOUD_PROJECT": ""}
+		envUpdates = map[string]string{"GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"}
 	case "vertex-ai":
 		envUpdates = map[string]string{
-			"GOOGLE_CLOUD_PROJECT":  "",
-			"GOOGLE_CLOUD_LOCATION": "",
+			"GOOGLE_CLOUD_PROJECT":  "${GOOGLE_CLOUD_PROJECT}",
+			"GOOGLE_CLOUD_LOCATION": "${GOOGLE_CLOUD_LOCATION}",
 		}
 		volUpdates = append(volUpdates, api.VolumeMount{
 			Source:   filepath.Join(home, ".config", "gcloud"),

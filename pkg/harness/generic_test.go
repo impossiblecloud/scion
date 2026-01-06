@@ -24,11 +24,12 @@ func TestGeneric_DiscoverAuth(t *testing.T) {
 	g := &Generic{}
 	auth := g.DiscoverAuth("/tmp")
 
-	if auth.GeminiAPIKey != "test-gemini-key" {
-		t.Errorf("Expected GeminiAPIKey 'test-gemini-key', got '%s'", auth.GeminiAPIKey)
+	// Implicit env discovery is removed, so these should be empty
+	if auth.GeminiAPIKey != "" {
+		t.Errorf("Expected GeminiAPIKey '', got '%s'", auth.GeminiAPIKey)
 	}
-	if auth.AnthropicAPIKey != "test-anthropic-key" {
-		t.Errorf("Expected AnthropicAPIKey 'test-anthropic-key', got '%s'", auth.AnthropicAPIKey)
+	if auth.AnthropicAPIKey != "" {
+		t.Errorf("Expected AnthropicAPIKey '', got '%s'", auth.AnthropicAPIKey)
 	}
 }
 

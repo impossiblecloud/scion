@@ -84,7 +84,6 @@ func (g *GeminiCLI) GetEnv(agentName string, agentHome string, unixUsername stri
 	if relPath := g.getSystemPromptRelPath(agentHome); relPath != "" {
 		fullPath := fmt.Sprintf("%s/%s", util.GetHomeDir(unixUsername), relPath)
 		env["GEMINI_SYSTEM_MD"] = fullPath
-		env["GEMINI_SYSTEM_PROMPT"] = fullPath
 	}
 
 	if auth.GeminiAPIKey != "" {

@@ -32,6 +32,8 @@ type ServerConfig struct {
 	// DevAuthToken is the development authentication token.
 	// If non-empty, development auth middleware is enabled.
 	DevAuthToken string
+	// Debug enables verbose debug logging.
+	Debug bool
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -235,10 +237,29 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
+		if s.config.Debug {
+			log.Printf("[Hub] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
+			if r.URL.RawQuery != "" {
+				log.Printf("[Hub]     query: %s", r.URL.RawQuery)
+			}
+			for name, values := range r.Header {
+				if name == "Authorization" {
+					log.Printf("[Hub]     header: %s: [REDACTED]", name)
+				} else {
+					log.Printf("[Hub]     header: %s: %s", name, strings.Join(values, ", "))
+				}
+			}
+		}
+
 		next.ServeHTTP(wrapped, r)
 
-		log.Printf("%s %s %d %s",
-			r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		if s.config.Debug {
+			log.Printf("[Hub] <-- %s %s %d (%s)",
+				r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		} else {
+			log.Printf("%s %s %d %s",
+				r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		}
 	})
 }
 

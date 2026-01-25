@@ -45,6 +45,9 @@ type ServerConfig struct {
 	CORSAllowedMethods []string
 	CORSAllowedHeaders []string
 	CORSMaxAge         int
+
+	// Debug enables verbose debug logging.
+	Debug bool
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -214,10 +217,29 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
+		if s.config.Debug {
+			log.Printf("[RuntimeHost] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
+			if r.URL.RawQuery != "" {
+				log.Printf("[RuntimeHost]     query: %s", r.URL.RawQuery)
+			}
+			for name, values := range r.Header {
+				if name == "Authorization" {
+					log.Printf("[RuntimeHost]     header: %s: [REDACTED]", name)
+				} else {
+					log.Printf("[RuntimeHost]     header: %s: %s", name, strings.Join(values, ", "))
+				}
+			}
+		}
+
 		next.ServeHTTP(wrapped, r)
 
-		log.Printf("[RuntimeHost] %s %s %d %s",
-			r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		if s.config.Debug {
+			log.Printf("[RuntimeHost] <-- %s %s %d (%s)",
+				r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		} else {
+			log.Printf("[RuntimeHost] %s %s %d %s",
+				r.Method, r.URL.Path, wrapped.statusCode, time.Since(start))
+		}
 	})
 }
 

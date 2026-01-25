@@ -34,6 +34,7 @@ var (
 	runtimeHostPort   int
 	dbURL             string
 	enableDevAuth     bool
+	enableDebug       bool
 )
 
 // serverCmd represents the server command
@@ -112,6 +113,11 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	// Check if at least one server is enabled
 	if !enableHub && !cfg.RuntimeHost.Enabled {
 		return fmt.Errorf("no server components enabled; use --enable-hub or --enable-runtime-host")
+	}
+
+	// Log debug mode status
+	if enableDebug {
+		log.Println("Debug logging enabled")
 	}
 
 	// Setup graceful shutdown
@@ -202,6 +208,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			CORSAllowedHeaders: cfg.Hub.CORSAllowedHeaders,
 			CORSMaxAge:         cfg.Hub.CORSMaxAge,
 			DevAuthToken:       devAuthToken,
+			Debug:              enableDebug,
 		}
 
 		// Create Hub server
@@ -258,6 +265,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			CORSAllowedMethods: cfg.RuntimeHost.CORSAllowedMethods,
 			CORSAllowedHeaders: cfg.RuntimeHost.CORSAllowedHeaders,
 			CORSMaxAge:         cfg.RuntimeHost.CORSMaxAge,
+			Debug:              enableDebug,
 		}
 
 		// Create Runtime Host server
@@ -520,4 +528,7 @@ func init() {
 
 	// Auth flags
 	serverStartCmd.Flags().BoolVar(&enableDevAuth, "dev-auth", false, "Enable development authentication (auto-generates token)")
+
+	// Debug flags
+	serverStartCmd.Flags().BoolVar(&enableDebug, "debug", false, "Enable debug logging (verbose output)")
 }

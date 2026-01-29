@@ -1,7 +1,7 @@
 # Hosted Template Management Design
 
 ## Status
-**In Progress** (Phase 2 Complete)
+**In Progress** (Phase 3 Complete)
 
 ## 1. Overview
 
@@ -1027,11 +1027,11 @@ Template operations will emit events:
 - [x] Manifest computation and validation
 - [x] CLI `template sync`, `template push`, and `template pull`
 
-### Phase 3: Runtime Integration
-- [ ] Template cache on Runtime Host
-- [ ] Hydration during agent creation
-- [ ] Cache eviction and management
-- [ ] Hub connectivity error handling
+### Phase 3: Runtime Integration ✓
+- [x] Template cache on Runtime Host (`pkg/templatecache/cache.go`)
+- [x] Hydration during agent creation (`pkg/templatecache/hydrator.go`)
+- [x] Cache eviction and management (LRU eviction in `cache.go`)
+- [x] Hub connectivity error handling (`pkg/runtimehost/errors.go`, `hydrator.go`)
 
 ### Phase 4: Advanced Features
 - [ ] Template inheritance
@@ -1305,4 +1305,201 @@ rm -rf /tmp/test-template /tmp/test-template-pulled /tmp/manifest-test
 
 # Remove test database and storage (if needed)
 rm -rf ~/.scion/hub.db /tmp/scion-storage
+```
+
+---
+
+## Appendix B: Phase 3 QA Walkthrough
+
+This section provides verification steps for the Phase 3 Runtime Integration implementation.
+
+### B.1. Prerequisites
+
+- Go 1.21+ installed
+- Hub server running with storage configured (from Phase 2)
+- Docker available for agent creation tests (optional)
+- Template created and uploaded via Phase 2 flow
+
+### B.2. Integration Test Script
+
+A comprehensive integration test script is available that tests all three phases:
+
+```bash
+# Run the full test suite
+./scripts/template-integration-test.sh
+
+# Skip building if scion binary already exists
+./scripts/template-integration-test.sh --skip-build
+
+# Keep test artifacts for inspection
+./scripts/template-integration-test.sh --skip-cleanup
+
+# Use GCS storage instead of local
+./scripts/template-integration-test.sh --storage-bucket your-bucket-name
+
+# Verbose output
+./scripts/template-integration-test.sh --verbose
+```
+
+### B.3. Manual Template Cache Testing
+
+Test the template cache functionality:
+
+```bash
+# Start server with template cache configuration
+./scion server start \
+  --enable-hub \
+  --enable-runtime-host \
+  --dev-auth \
+  --storage-dir /tmp/scion-storage \
+  --template-cache-dir /tmp/scion-cache/templates \
+  --template-cache-max 10485760
+
+# Check cache directory structure
+ls -la /tmp/scion-cache/templates/
+
+# View cache index
+cat /tmp/scion-cache/templates/index.json | jq
+
+# Cache should have structure:
+# /tmp/scion-cache/templates/
+# ├── {contentHash}/          # Content-addressable storage
+# │   ├── scion-agent.yaml
+# │   └── home/...
+# └── index.json              # Maps templateId → contentHash
+```
+
+### B.4. Template Hydration Testing
+
+Test template hydration during agent creation:
+
+```bash
+TOKEN=$(cat ~/.scion/dev-token)
+AUTH="Authorization: Bearer $TOKEN"
+RUNTIME_URL="http://localhost:9800"
+
+# Create a template first (Phase 2)
+# Then create an agent using that template
+
+# Create agent with template info (triggers hydration)
+curl -X POST "$RUNTIME_URL/api/v1/agents" \
+  -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "cache-test-agent",
+    "config": {
+      "template": "test-template",
+      "templateId": "YOUR_TEMPLATE_ID",
+      "templateHash": "YOUR_CONTENT_HASH"
+    }
+  }' | jq
+
+# Verify template was cached
+ls -la /tmp/scion-cache/templates/
+cat /tmp/scion-cache/templates/index.json | jq
+```
+
+### B.5. Cache Eviction Testing
+
+Test LRU cache eviction:
+
+```bash
+# Start server with small cache size (1MB)
+./scion server start \
+  --enable-hub \
+  --enable-runtime-host \
+  --dev-auth \
+  --storage-dir /tmp/scion-storage \
+  --template-cache-dir /tmp/scion-cache/templates \
+  --template-cache-max 1048576
+
+# Create multiple templates (each ~500KB)
+# Create agents using different templates
+# Oldest unused templates should be evicted
+
+# Check cache size
+cat /tmp/scion-cache/templates/index.json | jq '{totalSize, maxSize, entryCount: (.entries | length)}'
+```
+
+### B.6. Hub Connectivity Error Testing
+
+Test error handling when Hub is unreachable:
+
+```bash
+TOKEN=$(cat ~/.scion/dev-token)
+RUNTIME_URL="http://localhost:9800"
+
+# Start Runtime Host without Hub connectivity
+# (Hub endpoint configured but Hub not running)
+
+# Try to create agent with Hub template
+curl -X POST "$RUNTIME_URL/api/v1/agents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "error-test-agent",
+    "config": {
+      "templateId": "some-template-id",
+      "templateHash": "some-hash"
+    }
+  }' | jq
+
+# Expected response:
+# {
+#   "error": {
+#     "code": "hub_unreachable",
+#     "message": "Hub is unreachable. Check Hub connectivity or use solo mode.",
+#     "details": "..."
+#   }
+# }
+```
+
+### B.7. Unit Tests
+
+Run the templatecache package unit tests:
+
+```bash
+# Run all templatecache tests
+go test ./pkg/templatecache/... -v
+
+# Run specific test
+go test ./pkg/templatecache/... -v -run TestEviction
+
+# Run with coverage
+go test ./pkg/templatecache/... -cover
+```
+
+### B.8. Phase 3 Checklist
+
+| Component | Status |
+|-----------|--------|
+| `pkg/templatecache/cache.go` - Content-addressable cache | ✓ Implemented |
+| `pkg/templatecache/cache.go` - LRU eviction | ✓ Implemented |
+| `pkg/templatecache/cache.go` - Index persistence | ✓ Implemented |
+| `pkg/templatecache/hydrator.go` - Template fetching | ✓ Implemented |
+| `pkg/templatecache/hydrator.go` - Hash verification | ✓ Implemented |
+| `pkg/templatecache/hydrator.go` - Connectivity error detection | ✓ Implemented |
+| `pkg/runtimehost/server.go` - Hub client integration | ✓ Implemented |
+| `pkg/runtimehost/server.go` - Cache initialization | ✓ Implemented |
+| `pkg/runtimehost/handlers.go` - Hydration in createAgent | ✓ Implemented |
+| `pkg/runtimehost/errors.go` - Hub unreachable error | ✓ Implemented |
+| `pkg/runtimehost/types.go` - TemplateID/TemplateHash fields | ✓ Implemented |
+| `pkg/hub/server.go` - RemoteAgentConfig template fields | ✓ Implemented |
+| `pkg/hub/httpdispatcher.go` - Template info in dispatch | ✓ Implemented |
+| `pkg/store/models.go` - AgentAppliedConfig template fields | ✓ Implemented |
+| `cmd/server.go` - Template cache CLI flags | ✓ Implemented |
+| Unit tests for cache | ✓ Implemented |
+| Unit tests for hydrator | ✓ Implemented |
+| Integration test script | ✓ Implemented |
+
+### B.9. Cleanup
+
+```bash
+# Remove test cache and storage
+rm -rf /tmp/scion-cache /tmp/scion-storage
+
+# Stop server with Ctrl+C
+
+# Remove test database
+rm -rf ~/.scion/hub.db
 ```

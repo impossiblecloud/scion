@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/apiclient"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
@@ -619,6 +620,9 @@ func createHubClient(settings *config.Settings, endpoint string) (hubclient.Clie
 
 // wrapHubError wraps a Hub error with guidance to disable Hub integration.
 func wrapHubError(err error) error {
+	if apiclient.IsUnauthorizedError(err) {
+		return fmt.Errorf("%w\n\nHub session expired or unauthorized.\nTo login, run: scion hub auth login\nTo use local-only mode, use: scion --no-hub <command>", err)
+	}
 	return fmt.Errorf("%w\n\nTo use local-only mode, use: scion --no-hub <command>", err)
 }
 

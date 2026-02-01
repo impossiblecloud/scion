@@ -2,6 +2,7 @@ package apiclient
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -157,7 +158,8 @@ func statusToCode(status int) string {
 
 // IsNotFoundError checks if an error is a not found API error.
 func IsNotFoundError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		return apiErr.IsNotFound()
 	}
 	return false
@@ -165,7 +167,8 @@ func IsNotFoundError(err error) bool {
 
 // IsUnauthorizedError checks if an error is an unauthorized API error.
 func IsUnauthorizedError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		return apiErr.IsUnauthorized()
 	}
 	return false
@@ -173,7 +176,8 @@ func IsUnauthorizedError(err error) bool {
 
 // IsConflictError checks if an error is a conflict API error.
 func IsConflictError(err error) bool {
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
 		return apiErr.IsConflict()
 	}
 	return false

@@ -219,10 +219,18 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[Host] Set SCION_HUB_TOKEN (length=%d)", len(req.AgentToken))
 		}
 	}
-	if req.HubEndpoint != "" {
-		env["SCION_HUB_URL"] = req.HubEndpoint
+	// Set Hub URL: prefer request's HubEndpoint, fall back to server's configured HubEndpoint
+	hubEndpoint := req.HubEndpoint
+	if hubEndpoint == "" && s.config.HubEndpoint != "" {
+		hubEndpoint = s.config.HubEndpoint
 		if s.config.Debug {
-			log.Printf("[Host] Set SCION_HUB_URL=%s", req.HubEndpoint)
+			log.Printf("[Host] Using server's configured Hub endpoint as fallback")
+		}
+	}
+	if hubEndpoint != "" {
+		env["SCION_HUB_URL"] = hubEndpoint
+		if s.config.Debug {
+			log.Printf("[Host] Set SCION_HUB_URL=%s", hubEndpoint)
 		}
 	}
 	if req.AgentID != "" {

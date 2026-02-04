@@ -173,10 +173,16 @@ func processHookData(data []byte) error {
 	statusHandler := handlers.NewStatusHandler()
 	loggingHandler := handlers.NewLoggingHandler()
 	promptHandler := handlers.NewPromptHandler()
+	hubHandler := handlers.NewHubHandler()
 
 	processor.AddHandler(statusHandler.Handle)
 	processor.AddHandler(loggingHandler.Handle)
 	processor.AddHandler(promptHandler.Handle)
+
+	// Add Hub handler if configured
+	if hubHandler != nil {
+		processor.AddHandler(hubHandler.Handle)
+	}
 
 	return processor.ProcessRaw(rawData, hookDialect)
 }
@@ -185,6 +191,7 @@ func processHookData(data []byte) error {
 func runAskUser(message string) {
 	statusHandler := handlers.NewStatusHandler()
 	loggingHandler := handlers.NewLoggingHandler()
+	hubHandler := handlers.NewHubHandler()
 
 	// Update session status to waiting for input
 	if err := statusHandler.UpdateStatus(hooks.StateWaitingForInput, true); err != nil {
@@ -197,6 +204,13 @@ func runAskUser(message string) {
 		log.Error("Failed to log event: %v", err)
 	}
 
+	// Send status to Hub
+	if hubHandler != nil {
+		if err := hubHandler.ReportWaitingForInput(message); err != nil {
+			log.Error("Failed to report to Hub: %v", err)
+		}
+	}
+
 	fmt.Printf("Agent asked: %s\n", message)
 }
 
@@ -204,6 +218,7 @@ func runAskUser(message string) {
 func runTaskCompleted(message string) {
 	statusHandler := handlers.NewStatusHandler()
 	loggingHandler := handlers.NewLoggingHandler()
+	hubHandler := handlers.NewHubHandler()
 
 	// Update session status to completed
 	if err := statusHandler.UpdateStatus(hooks.StateCompleted, true); err != nil {
@@ -214,6 +229,13 @@ func runTaskCompleted(message string) {
 	logMessage := fmt.Sprintf("Agent completed task: %s", message)
 	if err := loggingHandler.LogEvent(hooks.StateCompleted, logMessage); err != nil {
 		log.Error("Failed to log event: %v", err)
+	}
+
+	// Send status to Hub
+	if hubHandler != nil {
+		if err := hubHandler.ReportTaskCompleted(message); err != nil {
+			log.Error("Failed to report to Hub: %v", err)
+		}
 	}
 
 	fmt.Printf("Agent completed: %s\n", message)

@@ -596,11 +596,50 @@ The specific approach will be determined based on the chosen cloud backend.
 | Trace viewer | `web/src/client` | Embedded trace UI |
 | Log search | `web/src/client` | Query interface |
 
+## 9. System Component Logging
+
+While `sciontool` handles telemetry for agents, the Hub and Runtime Host servers require a robust internal logging strategy for operational observability.
+
+### 9.1 Structured Logging with slog
+
+All backend components (Hub, Runtime Host) must use the Go standard library's `log/slog` package for structured logging.
+
+- **Standardization**: Consistent key names across all components (e.g., `msg`, `level`, `time`, `component`, `trace_id`).
+- **Performance**: High-performance structured logging with minimal allocation overhead.
+- **Interoperability**: Standard interface allowing for easy handler swaps.
+
+### 9.2 Log Levels and Verbosity
+
+Logs are emitted at several levels:
+- `DEBUG`: Detailed information for troubleshooting. Only emitted when explicitly enabled.
+- `INFO`: Normal operational events (startup, shutdown, significant state changes).
+- `WARN`: Unexpected events that don't stop the service (e.g., transient network errors).
+- `ERROR`: Critical failures requiring attention.
+
+Debug logging can be enabled globally or per-component via the `SCION_LOG_LEVEL=debug` environment variable.
+
+### 9.3 GCP Cloud Logging Integration
+
+In production environments, logs are forwarded to Google Cloud Logging. To maintain a lightweight footprint, the system implements a custom `slog.Handler` that formats logs specifically for the Cloud Logging JSON schema.
+
+- **Schema Mapping**: Map `slog` levels to GCP `severity` levels.
+- **Metadata**: Automatically include `logging.googleapis.com/labels` and `logging.googleapis.com/sourceLocation`.
+- **Trace Correlation**: If a trace context is present, include `logging.googleapis.com/trace` to link logs with traces in the Google Cloud Console.
+- **Reference**: The implementation follows the pattern established by [sloggcp](https://github.com/Permify/sloggcp).
+
+### 9.4 Contextual Metadata
+
+To facilitate debugging across distributed components, the following fields should be included in log records where applicable:
+- `grove_id`: The ID of the grove being processed.
+- `agent_id`: The ID of the agent involved.
+- `request_id`: A unique ID for the incoming API request.
+- `user_id`: The ID of the authenticated user.
+
 ---
 
-## 9. Configuration Reference
+## 10. Configuration Reference
 
-### 9.1 Environment Variables
+### 10.1 Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -614,7 +653,7 @@ The specific approach will be determined based on the chosen cloud backend.
 | `SCION_TELEMETRY_DEBUG` | Local debug output | `false` |
 | `SCION_LOG_LEVEL` | Logging verbosity | `info` |
 
-### 9.2 Full Configuration File
+### 10.2 Full Configuration File
 
 ```yaml
 telemetry:
@@ -676,9 +715,9 @@ telemetry:
 
 ---
 
-## 10. Open Questions
+## 11. Open Questions
 
-### 10.1 Cloud Backend Selection
+### 11.1 Cloud Backend Selection
 
 **Decision:** Google Cloud Observability (Cloud Trace, Cloud Logging, Cloud Monitoring) is the primary target for the initial implementation.
 
@@ -737,7 +776,7 @@ telemetry:
 - Manual purge or cleanup scripts can be developed if storage becomes an issue.
 ---
 
-## 11. References
+## 12. References
 
 - [Normalized Metrics Research](./../metrics/metrics-data-findings.md)
 - [Codex OTel Catalog](./../metrics/codex-otel.md)

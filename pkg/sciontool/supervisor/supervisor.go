@@ -26,6 +26,10 @@ var ErrNoCommand = errors.New("no command specified")
 type Config struct {
 	// GracePeriod is the time to wait after SIGTERM before sending SIGKILL.
 	GracePeriod time.Duration
+	// UID is the target UID for the child process (0 = no change)
+	UID int
+	// GID is the target GID for the child process (0 = no change)
+	GID int
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -76,6 +80,15 @@ func (s *Supervisor) Run(ctx context.Context, args []string) (int, error) {
 	// Start in a new process group so we can signal the whole group
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
+	}
+
+	// Drop privileges if UID/GID specified
+	if s.config.UID > 0 && s.config.GID > 0 {
+		s.cmd.SysProcAttr.Credential = &syscall.Credential{
+			Uid: uint32(s.config.UID),
+			Gid: uint32(s.config.GID),
+		}
+		log.Debug("Child will run as UID=%d, GID=%d", s.config.UID, s.config.GID)
 	}
 
 	if err := s.cmd.Start(); err != nil {

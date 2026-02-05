@@ -8,6 +8,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/user"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -81,6 +84,9 @@ func runInit(args []string) int {
 	log.Info("Child command: %v", childArgs)
 	log.Info("Grace period: %s", gracePeriod)
 
+	// Set up scion user UID/GID to match host user
+	targetUID, targetGID := setupHostUser()
+
 	// Initialize lifecycle hooks manager
 	lifecycleManager := hooks.NewLifecycleManager()
 
@@ -104,6 +110,8 @@ func runInit(args []string) int {
 	// Create supervisor with configuration
 	config := supervisor.Config{
 		GracePeriod: gracePeriod,
+		UID:         targetUID,
+		GID:         targetGID,
 	}
 	sup := supervisor.New(config)
 
@@ -224,4 +232,60 @@ func runInit(args []string) int {
 // Cobra handles -- separator, so args contains everything after --.
 func extractChildCommand(args []string) []string {
 	return args
+}
+
+// setupHostUser modifies the scion user's UID/GID to match the host user.
+// This is only done when running as root and SCION_HOST_UID/GID are set.
+// Returns the target UID/GID for the child process.
+func setupHostUser() (int, int) {
+	// Only run if we're root and env vars are set
+	if os.Getuid() != 0 {
+		log.Debug("Not running as root, skipping user setup")
+		return os.Getuid(), os.Getgid()
+	}
+
+	hostUID := os.Getenv("SCION_HOST_UID")
+	hostGID := os.Getenv("SCION_HOST_GID")
+
+	if hostUID == "" || hostGID == "" {
+		log.Debug("SCION_HOST_UID/GID not set, skipping user setup")
+		return 0, 0 // Continue as root
+	}
+
+	uid, err := strconv.Atoi(hostUID)
+	if err != nil {
+		log.Error("Invalid SCION_HOST_UID: %v", err)
+		return 0, 0
+	}
+	gid, err := strconv.Atoi(hostGID)
+	if err != nil {
+		log.Error("Invalid SCION_HOST_GID: %v", err)
+		return 0, 0
+	}
+
+	// Skip if UID/GID already match (1001 is the default)
+	currentInfo, _ := user.Lookup("scion")
+	if currentInfo != nil {
+		currentUID, _ := strconv.Atoi(currentInfo.Uid)
+		currentGID, _ := strconv.Atoi(currentInfo.Gid)
+		if currentUID == uid && currentGID == gid {
+			log.Debug("scion user already has correct UID/GID")
+			return uid, gid
+		}
+	}
+
+	log.Info("Setting scion user to UID=%d, GID=%d", uid, gid)
+
+	// Modify group first (if different from current)
+	if err := exec.Command("groupmod", "-g", hostGID, "scion").Run(); err != nil {
+		log.Error("Failed to modify scion group: %v", err)
+	}
+
+	// Modify user UID and primary group
+	if err := exec.Command("usermod", "-u", hostUID, "-g", hostGID, "scion").Run(); err != nil {
+		log.Error("Failed to modify scion user: %v", err)
+		return 0, 0
+	}
+
+	return uid, gid
 }

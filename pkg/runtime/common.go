@@ -183,6 +183,10 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 		}
 	}
 
+	// Pass host user UID/GID for container user synchronization
+	addEnv("SCION_HOST_UID", fmt.Sprintf("%d", os.Getuid()))
+	addEnv("SCION_HOST_GID", fmt.Sprintf("%d", os.Getgid()))
+
 	// Mount gcloud config if it exists
 	home, _ := os.UserHomeDir()
 	gcloudConfigDir := filepath.Join(home, ".config", "gcloud")

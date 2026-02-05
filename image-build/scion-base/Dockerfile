@@ -48,7 +48,9 @@ RUN useradd -m -s /bin/zsh -u 1001 scion && \
 # Set ownership for npm global directory
 RUN chown -R scion:scion /usr/local/share/npm-global
 
-USER scion
+# Note: Container starts as root to allow sciontool init to adjust
+# the scion user's UID/GID to match the host user for proper file
+# permissions on mounted volumes. The child process drops privileges.
 
 # Set sciontool as the container entrypoint (PID 1)
 # The -- separator ensures everything after it is treated as the child command

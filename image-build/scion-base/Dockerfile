@@ -41,7 +41,7 @@ COPY --from=builder /usr/local/bin/scion /usr/local/bin/scion
 COPY --from=builder /usr/local/bin/sciontool /usr/local/bin/sciontool
 
 # Create scion user with passwordless sudo
-RUN useradd -m -s /bin/zsh -u 1001 scion && \
+RUN useradd -m -s /bin/zsh -u 1000 scion && \
     echo "scion ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/scion && \
     chmod 0440 /etc/sudoers.d/scion
 

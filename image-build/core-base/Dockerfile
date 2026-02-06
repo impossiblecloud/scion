@@ -52,6 +52,9 @@ RUN make prefix=/usr/local install
 FROM node:20-slim
 USER root
 
+# Remove default node user to avoid UID 1000 collision with host user
+RUN if getent passwd node; then userdel -r node; fi
+
 COPY --from=builder /etc/apt/keyrings/githubcli-archive-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
 COPY --from=builder /usr/share/keyrings/cloud.google.gpg /usr/share/keyrings/cloud.google.gpg
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list

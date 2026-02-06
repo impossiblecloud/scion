@@ -324,12 +324,12 @@ func setupHostUser() (int, int) {
 	log.Info("Adjusting scion user to UID=%d, GID=%d", uid, gid)
 
 	// Modify group first (if different from current)
-	if err := exec.Command("groupmod", "-g", hostGID, "scion").Run(); err != nil {
+	if err := exec.Command("groupmod", "-o", "-g", hostGID, "scion").Run(); err != nil {
 		log.Error("Failed to modify scion group to %s: %v", hostGID, err)
 	}
 
 	// Modify user UID and primary group
-	if err := exec.Command("usermod", "-u", hostUID, "-g", hostGID, "scion").Run(); err != nil {
+	if err := exec.Command("usermod", "-o", "-u", hostUID, "-g", hostGID, "scion").Run(); err != nil {
 		log.Error("Failed to modify scion user to UID %s, GID %s: %v", hostUID, hostGID, err)
 		return 0, 0
 	}

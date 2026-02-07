@@ -536,9 +536,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 			// Control channel and heartbeat - enabled when Hub is configured.
 			// When co-located (both enabled, not simulating remote), skip control channel
-			// since RuntimeBroker can communicate directly via localhost HTTP.
+			// and network heartbeats since RuntimeBroker can communicate directly via 
+			// internal mechanism or localhost HTTP.
 			ControlChannelEnabled: hubEndpointForRH != "" && (simulateRemoteBroker || !enableHub),
-			HeartbeatEnabled:      hubEndpointForRH != "",
+			HeartbeatEnabled:      hubEndpointForRH != "" && (simulateRemoteBroker || !enableHub),
 		}
 
 		// Create Runtime Broker server
@@ -579,6 +580,26 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			log.Printf("Warning: failed to register global grove: %v", err)
 		} else {
 			log.Printf("Registered global grove with runtime broker %s (endpoint: %s)", brokerName, rhEndpoint)
+
+			// Start internal heartbeat loop for co-located operation.
+			// This keeps the broker marked as online in the Hub database without
+			// requiring network heartbeats or broker credentials.
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ticker := time.NewTicker(30 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if err := s.UpdateRuntimeBrokerHeartbeat(ctx, brokerID, store.BrokerStatusOnline); err != nil {
+							log.Printf("Warning: failed to update internal heartbeat for %s: %v", brokerName, err)
+						}
+					}
+				}
+			}()
 		}
 	} else if simulateRemoteBroker && enableHub && cfg.RuntimeBroker.Enabled {
 		log.Printf("Simulating remote broker: skipping automatic global grove registration")

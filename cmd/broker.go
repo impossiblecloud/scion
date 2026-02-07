@@ -1,0 +1,786 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/ptone/scion-agent/pkg/brokercredentials"
+	"github.com/ptone/scion-agent/pkg/config"
+	"github.com/ptone/scion-agent/pkg/daemon"
+	"github.com/ptone/scion-agent/pkg/hubclient"
+	"github.com/ptone/scion-agent/pkg/hubsync"
+	"github.com/ptone/scion-agent/pkg/util"
+	"github.com/ptone/scion-agent/pkg/version"
+	"github.com/spf13/cobra"
+)
+
+var (
+	// broker register flags
+	brokerForceRegister bool
+	brokerAutoProvide   bool
+
+	// broker deregister flags
+	brokerDeregisterBrokerOnly bool
+
+	// broker start flags
+	brokerStartForeground bool
+	brokerStartPort       int
+	brokerStartAutoProvide bool
+
+	// broker provide/withdraw flags
+	brokerGroveID string
+)
+
+// brokerCmd represents the broker command group
+var brokerCmd = &cobra.Command{
+	Use:   "broker",
+	Short: "Manage the Runtime Broker",
+	Long: `Commands for managing this host as a Runtime Broker.
+
+A Runtime Broker is a compute node that executes agents on behalf of the Hub.
+Brokers register with the Hub and can be added as providers for groves.
+
+Commands:
+  register     Register this host as a Runtime Broker with the Hub
+  deregister   Remove this broker from the Hub
+  start        Start the broker server (as daemon by default)
+  provide      Add this broker as a provider for a grove
+  withdraw     Remove this broker as a provider from a grove`,
+}
+
+// brokerRegisterCmd registers this broker with the Hub
+var brokerRegisterCmd = &cobra.Command{
+	Use:   "register",
+	Short: "Register this host as a Runtime Broker with the Hub",
+	Long: `Register this host as a Runtime Broker with the Hub.
+
+This command registers your machine as a compute node that can execute
+agents on behalf of the Hub. Once registered, the Hub can dispatch
+agent operations to this broker.
+
+Prerequisites:
+- The broker server must be running (scion broker start)
+- The Hub endpoint must be configured
+- You must be authenticated with the Hub
+
+This command will:
+1. Verify the local broker server is running
+2. Create a broker registration on the Hub
+3. Complete the two-phase join process
+4. Save broker credentials for future authentication
+
+Examples:
+  # Register this host as a broker
+  scion broker register
+
+  # Force re-registration even if already registered
+  scion broker register --force
+
+  # Register with auto-provide enabled
+  scion broker register --auto-provide`,
+	RunE: runBrokerRegister,
+}
+
+// brokerDeregisterCmd removes this broker from the Hub
+var brokerDeregisterCmd = &cobra.Command{
+	Use:   "deregister",
+	Short: "Remove this broker from the Hub",
+	Long: `Remove this broker from the Hub.
+
+This command will:
+1. Remove this broker from all groves it provides for
+2. Clear the stored broker token
+
+Use --broker-only to only remove the broker record without affecting grove providers.`,
+	RunE: runBrokerDeregister,
+}
+
+// brokerStartCmd starts the broker server
+var brokerStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the Runtime Broker server",
+	Long: `Start the Runtime Broker server.
+
+By default, the broker starts as a background daemon. Use --foreground
+to run in the current terminal session.
+
+The broker server provides an API for agent lifecycle management and
+communicates with the Hub for coordination.
+
+Examples:
+  # Start broker as daemon (background)
+  scion broker start
+
+  # Start broker in foreground
+  scion broker start --foreground
+
+  # Start broker on custom port
+  scion broker start --port 9801
+
+  # Start broker with auto-provide enabled
+  scion broker start --auto-provide`,
+	RunE: runBrokerStart,
+}
+
+// brokerProvideCmd adds this broker as a provider for a grove
+var brokerProvideCmd = &cobra.Command{
+	Use:   "provide",
+	Short: "Add this broker as a provider for a grove",
+	Long: `Add this broker as a provider for a grove.
+
+When a broker is a provider for a grove, it can execute agents
+for that grove. The Hub will dispatch agent operations to this
+broker when agents are created in the grove.
+
+If --grove is not specified, uses the current local grove.
+
+Examples:
+  # Add as provider for current grove
+  scion broker provide
+
+  # Add as provider for a specific grove
+  scion broker provide --grove <grove-id>`,
+	RunE: runBrokerProvide,
+}
+
+// brokerWithdrawCmd removes this broker as a provider from a grove
+var brokerWithdrawCmd = &cobra.Command{
+	Use:   "withdraw",
+	Short: "Remove this broker as a provider from a grove",
+	Long: `Remove this broker as a provider from a grove.
+
+After withdrawing, this broker will no longer receive agent dispatch
+requests for the grove. Existing agents on this broker will continue
+running but cannot be managed through the Hub until the broker is
+re-added as a provider.
+
+If --grove is not specified, uses the current local grove.
+
+Examples:
+  # Remove as provider from current grove
+  scion broker withdraw
+
+  # Remove as provider from a specific grove
+  scion broker withdraw --grove <grove-id>`,
+	RunE: runBrokerWithdraw,
+}
+
+func init() {
+	rootCmd.AddCommand(brokerCmd)
+	brokerCmd.AddCommand(brokerRegisterCmd)
+	brokerCmd.AddCommand(brokerDeregisterCmd)
+	brokerCmd.AddCommand(brokerStartCmd)
+	brokerCmd.AddCommand(brokerProvideCmd)
+	brokerCmd.AddCommand(brokerWithdrawCmd)
+
+	// Register flags
+	brokerRegisterCmd.Flags().BoolVar(&brokerForceRegister, "force", false, "Force re-registration even if already registered")
+	brokerRegisterCmd.Flags().BoolVar(&brokerAutoProvide, "auto-provide", false, "Automatically add as provider for new groves")
+
+	// Deregister flags
+	brokerDeregisterCmd.Flags().BoolVar(&brokerDeregisterBrokerOnly, "broker-only", false, "Only remove broker record, not grove providers")
+
+	// Start flags
+	brokerStartCmd.Flags().BoolVar(&brokerStartForeground, "foreground", false, "Run in foreground instead of as daemon")
+	brokerStartCmd.Flags().IntVar(&brokerStartPort, "port", DefaultBrokerPort, "Runtime Broker API port")
+	brokerStartCmd.Flags().BoolVar(&brokerStartAutoProvide, "auto-provide", false, "Automatically add as provider for new groves")
+
+	// Provide/withdraw flags
+	brokerProvideCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove ID to add as provider for")
+	brokerWithdrawCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove ID to remove as provider from")
+}
+
+func runBrokerRegister(cmd *cobra.Command, args []string) error {
+	// Resolve grove path to find project settings (needed for Hub endpoint config)
+	gp := grovePath
+	if gp == "" && globalMode {
+		gp = "global"
+	}
+
+	resolvedPath, isGlobal, err := config.ResolveGrovePath(gp)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	endpoint := GetHubEndpoint(settings)
+	if endpoint == "" {
+		return fmt.Errorf("Hub endpoint not configured.\n\nConfigure the Hub endpoint via:\n  - SCION_HUB_ENDPOINT environment variable\n  - hub.endpoint in settings.yaml\n  - --hub flag on any command\n\nExample: scion config set hub.endpoint https://hub.scion.dev --global")
+	}
+
+	// Step 1: Check if local broker server is running
+	health, err := checkLocalBrokerServer(DefaultBrokerPort)
+	if err != nil {
+		return fmt.Errorf("broker server not running on port %d.\n\nStart it with: scion broker start\n\nError: %w", DefaultBrokerPort, err)
+	}
+	fmt.Printf("Broker server is running (status: %s, version: %s)\n", health.Status, health.Version)
+
+	// Step 2: Check if grove is linked to Hub
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Check Hub connectivity
+	if _, err := client.Health(ctx); err != nil {
+		return fmt.Errorf("Hub at %s is not responding: %w", endpoint, err)
+	}
+
+	// Get grove name for display
+	var groveName string
+	if isGlobal {
+		groveName = "global"
+	} else {
+		gitRemote := util.GetGitRemote()
+		if gitRemote != "" {
+			groveName = util.ExtractRepoName(gitRemote)
+		} else {
+			groveName = filepath.Base(filepath.Dir(resolvedPath))
+		}
+	}
+
+	// Check if grove is linked
+	groveID := settings.GroveID
+	groveLinked := false
+	if groveID != "" {
+		groveLinked, _ = isGroveLinked(ctx, client, groveID)
+	}
+
+	if !groveLinked && !settings.IsHubEnabled() {
+		// Grove not linked - offer to link first
+		if hubsync.ShowLinkBeforeRegisterPrompt(groveName, autoConfirm) {
+			// Run the link flow
+			if err := runHubLink(cmd, args); err != nil {
+				return fmt.Errorf("failed to link grove: %w", err)
+			}
+			// Reload settings after linking
+			settings, err = config.LoadSettings(resolvedPath)
+			if err != nil {
+				return fmt.Errorf("failed to reload settings: %w", err)
+			}
+			groveID = settings.GroveID
+		}
+	}
+
+	// Step 3: Show broker registration confirmation
+	if !hubsync.ShowBrokerRegistrationPrompt(endpoint, autoConfirm) {
+		return fmt.Errorf("registration cancelled")
+	}
+
+	// Get hostname for broker name
+	brokerName, err := os.Hostname()
+	if err != nil {
+		brokerName = "local-host"
+	}
+
+	// ==== TWO-PHASE BROKER REGISTRATION ====
+	credStore := brokercredentials.NewStore("")
+	existingCreds, credErr := credStore.Load()
+
+	var brokerID string
+	var needsJoin bool
+
+	// Check if we already have valid credentials
+	if credErr == nil && existingCreds != nil && existingCreds.BrokerID != "" && !brokerForceRegister {
+		brokerID = existingCreds.BrokerID
+		fmt.Printf("Using existing broker credentials (brokerId: %s)\n", brokerID)
+
+		// Verify the broker still exists on the hub
+		_, err := client.RuntimeBrokers().Get(ctx, brokerID)
+		if err != nil {
+			fmt.Printf("Warning: existing broker not found on Hub, will re-register\n")
+			brokerID = ""
+			needsJoin = true
+		}
+	} else {
+		needsJoin = true
+	}
+
+	// Phase 1 & 2: Create broker and complete join if needed
+	if needsJoin || brokerID == "" {
+		fmt.Printf("Registering broker with Hub...\n")
+
+		// Phase 1: Create broker registration
+		createReq := &hubclient.CreateBrokerRequest{
+			Name: brokerName,
+			Capabilities: []string{
+				"sync",
+				"attach",
+			},
+			AutoProvide: brokerAutoProvide,
+		}
+
+		createResp, err := client.RuntimeBrokers().Create(ctx, createReq)
+		if err != nil {
+			return fmt.Errorf("failed to create broker registration: %w", err)
+		}
+
+		fmt.Printf("Broker created (ID: %s), completing join...\n", createResp.BrokerID)
+
+		// Phase 2: Complete broker join with join token
+		joinReq := &hubclient.JoinBrokerRequest{
+			BrokerID:  createResp.BrokerID,
+			JoinToken: createResp.JoinToken,
+			Hostname:  brokerName,
+			Version:   version.Version,
+			Capabilities: []string{
+				"sync",
+				"attach",
+			},
+		}
+
+		joinResp, err := client.RuntimeBrokers().Join(ctx, joinReq)
+		if err != nil {
+			return fmt.Errorf("failed to complete broker join: %w", err)
+		}
+
+		brokerID = joinResp.BrokerID
+
+		// Save credentials
+		if err := credStore.SaveFromJoinResponse(brokerID, joinResp.SecretKey, endpoint); err != nil {
+			fmt.Printf("Warning: failed to save broker credentials: %v\n", err)
+		} else {
+			fmt.Printf("Broker credentials saved to %s\n", credStore.Path())
+		}
+	}
+
+	// Save broker ID to global settings
+	globalDir, err := config.GetGlobalDir()
+	if err != nil {
+		fmt.Printf("Warning: failed to get global directory: %v\n", err)
+	} else {
+		if endpoint != "" {
+			if err := config.UpdateSetting(globalDir, "hub.endpoint", endpoint, true); err != nil {
+				fmt.Printf("Warning: failed to save hub endpoint to global settings: %v\n", err)
+			}
+		}
+		if err := config.UpdateSetting(globalDir, "hub.brokerId", brokerID, true); err != nil {
+			fmt.Printf("Warning: failed to save broker ID: %v\n", err)
+		}
+	}
+
+	// If grove is linked, offer to add this broker as a provider
+	if groveID != "" && settings.IsHubEnabled() {
+		if hubsync.ShowGroveProviderPrompt(groveName, autoConfirm) {
+			req := &hubclient.RegisterGroveRequest{
+				ID:       groveID,
+				Name:     groveName,
+				Path:     resolvedPath,
+				BrokerID: brokerID,
+			}
+			if !isGlobal {
+				req.GitRemote = util.NormalizeGitRemote(util.GetGitRemote())
+			}
+
+			resp, err := client.Groves().Register(ctx, req)
+			if err != nil {
+				fmt.Printf("Warning: failed to add broker to grove: %v\n", err)
+			} else {
+				fmt.Printf("Broker added as provider to grove '%s'\n", resp.Grove.Name)
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("Broker '%s' registered successfully (ID: %s)\n", brokerName, brokerID)
+	if brokerAutoProvide {
+		fmt.Println("Auto-provide is enabled - broker will be added to new groves automatically.")
+	}
+	fmt.Println("\nThe broker server will automatically connect to the Hub.")
+	fmt.Println("Use 'scion hub status' to check the connection status.")
+
+	return nil
+}
+
+func runBrokerDeregister(cmd *cobra.Command, args []string) error {
+	// Check for existing broker credentials
+	credStore := brokercredentials.NewStore("")
+	creds, credErr := credStore.Load()
+
+	// Also check global settings for broker ID
+	globalDir, globalErr := config.GetGlobalDir()
+	var brokerID string
+
+	if credErr == nil && creds != nil && creds.BrokerID != "" {
+		brokerID = creds.BrokerID
+	} else if globalErr == nil {
+		globalSettings, err := config.LoadSettings(globalDir)
+		if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
+			brokerID = globalSettings.Hub.BrokerID
+		}
+	}
+
+	if brokerID == "" {
+		return fmt.Errorf("no broker registration found.\n\nThis host is not registered as a Runtime Broker with the Hub.")
+	}
+
+	// Load settings for Hub client
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Check local broker-server health (warning only)
+	health, err := checkLocalBrokerServer(DefaultBrokerPort)
+	if err != nil {
+		fmt.Printf("Note: Broker server is not running (port %d)\n", DefaultBrokerPort)
+	} else {
+		fmt.Printf("Broker server is running (status: %s)\n", health.Status)
+	}
+
+	// Fetch list of groves this broker provides for
+	var groveNames []string
+	grovesResp, err := client.RuntimeBrokers().ListGroves(ctx, brokerID)
+	if err != nil {
+		util.Debugf("Warning: failed to list broker groves: %v", err)
+	} else if grovesResp != nil {
+		for _, g := range grovesResp.Groves {
+			groveNames = append(groveNames, g.GroveName)
+		}
+	}
+
+	// Show confirmation prompt with grove list
+	if !hubsync.ShowBrokerDeregistrationPrompt(brokerID, groveNames, autoConfirm) {
+		return fmt.Errorf("deregistration cancelled")
+	}
+
+	// Delete the broker from Hub
+	if err := client.RuntimeBrokers().Delete(ctx, brokerID); err != nil {
+		return fmt.Errorf("deregistration failed: %w", err)
+	}
+
+	// Clear local credentials
+	if err := credStore.Delete(); err != nil {
+		fmt.Printf("Warning: failed to delete local credentials: %v\n", err)
+	}
+
+	// Clear global settings
+	if globalErr == nil {
+		_ = config.UpdateSetting(globalDir, "hub.brokerToken", "", true)
+		_ = config.UpdateSetting(globalDir, "hub.brokerId", "", true)
+	}
+
+	fmt.Println()
+	fmt.Printf("Broker '%s' has been deregistered from the Hub.\n", brokerID)
+	fmt.Println("Local broker credentials have been cleared.")
+	if len(groveNames) > 0 {
+		fmt.Printf("The broker has been removed from %d grove(s).\n", len(groveNames))
+	}
+
+	return nil
+}
+
+func runBrokerStart(cmd *cobra.Command, args []string) error {
+	// Get global directory for daemon files
+	globalDir, err := config.GetGlobalDir()
+	if err != nil {
+		return fmt.Errorf("failed to get global directory: %w", err)
+	}
+
+	// Foreground mode - just run the server command directly
+	if brokerStartForeground {
+		// Build args for server start
+		serverArgs := []string{"server", "start", "--enable-runtime-broker"}
+		if brokerStartPort != DefaultBrokerPort {
+			serverArgs = append(serverArgs, fmt.Sprintf("--runtime-broker-port=%d", brokerStartPort))
+		}
+
+		fmt.Printf("Starting broker in foreground on port %d...\n", brokerStartPort)
+		fmt.Println("Press Ctrl+C to stop.")
+		fmt.Println()
+
+		// Run the server start command directly
+		serverStartCmd.SetArgs(serverArgs[2:]) // Skip "server" and "start"
+		return serverStartCmd.RunE(serverStartCmd, []string{})
+	}
+
+	// Daemon mode
+	// Check if already running
+	running, pid, _ := daemon.Status(globalDir)
+	if running {
+		return fmt.Errorf("broker is already running (PID: %d)\n\nUse 'kill %d' to stop it, or check the log at %s",
+			pid, pid, daemon.GetLogPath(globalDir))
+	}
+
+	// Find the scion executable
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to find scion executable: %w", err)
+	}
+
+	// Build args for the daemon process
+	daemonArgs := []string{"server", "start", "--enable-runtime-broker"}
+	if brokerStartPort != DefaultBrokerPort {
+		daemonArgs = append(daemonArgs, fmt.Sprintf("--runtime-broker-port=%d", brokerStartPort))
+	}
+
+	// Start daemon
+	fmt.Printf("Starting broker as daemon on port %d...\n", brokerStartPort)
+	if err := daemon.Start(executable, daemonArgs, globalDir); err != nil {
+		return fmt.Errorf("failed to start daemon: %w", err)
+	}
+
+	// Verify it started
+	time.Sleep(500 * time.Millisecond)
+	running, pid, err = daemon.Status(globalDir)
+	if !running {
+		return fmt.Errorf("daemon failed to start. Check log at: %s", daemon.GetLogPath(globalDir))
+	}
+
+	fmt.Printf("Broker started (PID: %d)\n", pid)
+	fmt.Printf("Log file: %s\n", daemon.GetLogPath(globalDir))
+	fmt.Printf("PID file: %s\n", daemon.GetPIDPath(globalDir))
+	fmt.Println()
+	fmt.Println("Use 'scion broker register' to register with the Hub.")
+	fmt.Printf("Use 'kill %d' to stop the broker.\n", pid)
+
+	return nil
+}
+
+func runBrokerProvide(cmd *cobra.Command, args []string) error {
+	// Get broker ID
+	credStore := brokercredentials.NewStore("")
+	creds, credErr := credStore.Load()
+
+	globalDir, globalErr := config.GetGlobalDir()
+	var brokerID string
+	var brokerName string
+
+	if credErr == nil && creds != nil && creds.BrokerID != "" {
+		brokerID = creds.BrokerID
+	} else if globalErr == nil {
+		globalSettings, err := config.LoadSettings(globalDir)
+		if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
+			brokerID = globalSettings.Hub.BrokerID
+		}
+	}
+
+	if brokerID == "" {
+		return fmt.Errorf("no broker registration found.\n\nRegister with: scion broker register")
+	}
+
+	// Get broker name for display
+	brokerName, _ = os.Hostname()
+	if brokerName == "" {
+		brokerName = brokerID[:8]
+	}
+
+	// Resolve grove ID
+	var groveID string
+	var groveName string
+
+	if brokerGroveID != "" {
+		groveID = brokerGroveID
+		groveName = groveID // Will be updated after fetching
+	} else {
+		// Use current grove
+		resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <id>", err)
+		}
+
+		settings, err := config.LoadSettings(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("failed to load settings: %w", err)
+		}
+
+		groveID = settings.GroveID
+		if groveID == "" {
+			return fmt.Errorf("current grove is not linked to the Hub.\n\nLink it first with: scion hub link\nOr specify a grove with --grove <id>")
+		}
+
+		// Get grove name for display
+		if isGlobal {
+			groveName = "global"
+		} else {
+			gitRemote := util.GetGitRemote()
+			if gitRemote != "" {
+				groveName = util.ExtractRepoName(gitRemote)
+			} else {
+				groveName = filepath.Base(filepath.Dir(resolvedPath))
+			}
+		}
+	}
+
+	// Load settings for Hub client
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// If we used grove ID from flag, fetch grove details for display
+	if brokerGroveID != "" {
+		grove, err := client.Groves().Get(ctx, groveID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch grove: %w", err)
+		}
+		groveName = grove.Name
+	}
+
+	// Show confirmation prompt
+	if !hubsync.ShowProvidePrompt(groveName, brokerName, autoConfirm) {
+		return fmt.Errorf("operation cancelled")
+	}
+
+	// Add broker as provider
+	req := &hubclient.RegisterGroveRequest{
+		ID:       groveID,
+		Name:     groveName,
+		BrokerID: brokerID,
+	}
+
+	resp, err := client.Groves().Register(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to add broker as provider: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Broker '%s' added as provider for grove '%s'\n", brokerName, resp.Grove.Name)
+
+	return nil
+}
+
+func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
+	// Get broker ID
+	credStore := brokercredentials.NewStore("")
+	creds, credErr := credStore.Load()
+
+	globalDir, globalErr := config.GetGlobalDir()
+	var brokerID string
+	var brokerName string
+
+	if credErr == nil && creds != nil && creds.BrokerID != "" {
+		brokerID = creds.BrokerID
+	} else if globalErr == nil {
+		globalSettings, err := config.LoadSettings(globalDir)
+		if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
+			brokerID = globalSettings.Hub.BrokerID
+		}
+	}
+
+	if brokerID == "" {
+		return fmt.Errorf("no broker registration found.\n\nRegister with: scion broker register")
+	}
+
+	// Get broker name for display
+	brokerName, _ = os.Hostname()
+	if brokerName == "" {
+		brokerName = brokerID[:8]
+	}
+
+	// Resolve grove ID
+	var groveID string
+	var groveName string
+
+	if brokerGroveID != "" {
+		groveID = brokerGroveID
+		groveName = groveID // Will be updated after fetching
+	} else {
+		// Use current grove
+		resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <id>", err)
+		}
+
+		settings, err := config.LoadSettings(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("failed to load settings: %w", err)
+		}
+
+		groveID = settings.GroveID
+		if groveID == "" {
+			return fmt.Errorf("current grove is not linked to the Hub.\n\nSpecify a grove with --grove <id>")
+		}
+
+		// Get grove name for display
+		if isGlobal {
+			groveName = "global"
+		} else {
+			gitRemote := util.GetGitRemote()
+			if gitRemote != "" {
+				groveName = util.ExtractRepoName(gitRemote)
+			} else {
+				groveName = filepath.Base(filepath.Dir(resolvedPath))
+			}
+		}
+	}
+
+	// Load settings for Hub client
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// If we used grove ID from flag, fetch grove details for display
+	if brokerGroveID != "" {
+		grove, err := client.Groves().Get(ctx, groveID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch grove: %w", err)
+		}
+		groveName = grove.Name
+	}
+
+	// Show confirmation prompt
+	if !hubsync.ShowWithdrawPrompt(groveName, brokerName, autoConfirm) {
+		return fmt.Errorf("operation cancelled")
+	}
+
+	// Remove broker as provider
+	if err := client.Groves().RemoveProvider(ctx, groveID, brokerID); err != nil {
+		return fmt.Errorf("failed to remove broker as provider: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Broker '%s' removed as provider from grove '%s'\n", brokerName, groveName)
+
+	return nil
+}

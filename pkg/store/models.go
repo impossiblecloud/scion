@@ -139,6 +139,10 @@ type RuntimeBroker struct {
 	// Network endpoint (for direct HTTP mode)
 	Endpoint string `json:"endpoint,omitempty"`
 
+	// Auto-provide configuration
+	// When true, this broker is automatically added as a provider for new groves
+	AutoProvide bool `json:"autoProvide,omitempty"`
+
 	// Timestamps
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`

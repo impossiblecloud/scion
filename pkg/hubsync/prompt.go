@@ -349,3 +349,27 @@ func ShowCleanConfirmPrompt(groveName, grovePath string, isGlobal bool, autoConf
 	// Default NO for safety - destructive operation
 	return ConfirmAction("Remove scion grove?", false, autoConfirm)
 }
+
+// ShowProvidePrompt asks if user wants to add the broker as a provider for a grove.
+// Returns true if the user confirms, false otherwise.
+func ShowProvidePrompt(groveName, brokerName string, autoConfirm bool) bool {
+	fmt.Println()
+	fmt.Printf("Add broker '%s' as a provider for grove '%s'?\n", brokerName, groveName)
+	fmt.Println()
+	fmt.Println("This will allow the broker to execute agents for this grove.")
+	return ConfirmAction("Continue?", true, autoConfirm)
+}
+
+// ShowWithdrawPrompt asks if user wants to remove the broker as a provider from a grove.
+// Returns true if the user confirms, false otherwise.
+func ShowWithdrawPrompt(groveName, brokerName string, autoConfirm bool) bool {
+	fmt.Println()
+	fmt.Printf("Remove broker '%s' as a provider from grove '%s'?\n", brokerName, groveName)
+	fmt.Println()
+	fmt.Println("The broker will no longer be able to execute agents for this grove.")
+	fmt.Println("Existing agents on this broker will continue running but cannot be")
+	fmt.Println("managed through the Hub until the broker is re-added as a provider.")
+	fmt.Println()
+	// Default NO for safety - could disrupt running agents
+	return ConfirmAction("Continue?", false, autoConfirm)
+}

@@ -91,6 +91,7 @@ type CreateBrokerRequest struct {
 	Name         string            `json:"name"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
+	AutoProvide  bool              `json:"autoProvide,omitempty"` // Automatically add as provider for new groves
 }
 
 // CreateBrokerResponse is returned when creating a new broker.

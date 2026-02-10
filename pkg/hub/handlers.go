@@ -1863,9 +1863,10 @@ func (s *Server) updateGrove(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	var updates struct {
-		Name       string            `json:"name,omitempty"`
-		Labels     map[string]string `json:"labels,omitempty"`
-		Visibility string            `json:"visibility,omitempty"`
+		Name                   string            `json:"name,omitempty"`
+		Labels                 map[string]string `json:"labels,omitempty"`
+		Visibility             string            `json:"visibility,omitempty"`
+		DefaultRuntimeBrokerID string            `json:"defaultRuntimeBrokerId,omitempty"`
 	}
 
 	if err := readJSON(r, &updates); err != nil {
@@ -1881,6 +1882,9 @@ func (s *Server) updateGrove(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if updates.Visibility != "" {
 		grove.Visibility = updates.Visibility
+	}
+	if updates.DefaultRuntimeBrokerID != "" {
+		grove.DefaultRuntimeBrokerID = updates.DefaultRuntimeBrokerID
 	}
 
 	if err := s.store.UpdateGrove(ctx, grove); err != nil {

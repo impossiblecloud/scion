@@ -381,6 +381,14 @@ func ShowProvidePrompt(groveName, brokerName string, autoConfirm bool) bool {
 	return ConfirmAction("Continue?", true, autoConfirm)
 }
 
+// ShowChangeDefaultBrokerPrompt asks if user wants to change the default broker for a grove.
+// Returns true if the user confirms, false otherwise.
+func ShowChangeDefaultBrokerPrompt(groveName, currentBrokerName, newBrokerName string, autoConfirm bool) bool {
+	fmt.Println()
+	fmt.Printf("Grove '%s' already has a default broker: '%s'\n", groveName, currentBrokerName)
+	return ConfirmAction(fmt.Sprintf("Change default broker to '%s'?", newBrokerName), false, autoConfirm)
+}
+
 // ShowWithdrawPrompt asks if user wants to remove the broker as a provider from a grove.
 // Returns true if the user confirms, false otherwise.
 func ShowWithdrawPrompt(groveName, brokerName string, autoConfirm bool) bool {

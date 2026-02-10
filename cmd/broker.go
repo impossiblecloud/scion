@@ -48,8 +48,9 @@ var (
 	brokerStartDebug       bool
 
 	// broker provide/withdraw flags
-	brokerGroveID   string
-	brokerBrokerID  string // --broker flag for remote broker operations
+	brokerGroveID      string
+	brokerBrokerID     string // --broker flag for remote broker operations
+	brokerMakeDefault  bool   // --make-default flag to set broker as grove default
 )
 
 // brokerCmd represents the broker command group
@@ -158,6 +159,10 @@ broker when agents are created in the grove.
 If --grove is not specified, uses the current local grove.
 If --broker is not specified, uses the local broker registration.
 
+Use --make-default to set the broker as the default for the grove. If the
+grove already has a different default broker, you will be prompted to confirm
+the change.
+
 Examples:
   # Add local broker as provider for current grove
   scion broker provide
@@ -166,7 +171,10 @@ Examples:
   scion broker provide --grove <grove-id>
 
   # Add a remote broker as provider for a grove (admin only)
-  scion broker provide --broker <broker-id> --grove <grove-id>`,
+  scion broker provide --broker <broker-id> --grove <grove-id>
+
+  # Add broker as provider and set as default
+  scion broker provide --make-default`,
 	RunE: runBrokerProvide,
 }
 
@@ -270,6 +278,7 @@ func init() {
 	// Provide/withdraw flags
 	brokerProvideCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove name or ID to add as provider for")
 	brokerProvideCmd.Flags().StringVar(&brokerBrokerID, "broker", "", "Broker name or ID to use (for remote broker operations)")
+	brokerProvideCmd.Flags().BoolVar(&brokerMakeDefault, "make-default", false, "Set this broker as the default for the grove")
 	brokerWithdrawCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove name or ID to remove as provider from")
 	brokerWithdrawCmd.Flags().StringVar(&brokerBrokerID, "broker", "", "Broker name or ID to use (for remote broker operations)")
 }
@@ -830,6 +839,45 @@ func runBrokerProvide(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Printf("Broker '%s' added as provider for grove '%s'\n", brokerName, resp.Grove.Name)
+
+	// Handle --make-default flag
+	if brokerMakeDefault {
+		currentDefault := resp.Grove.DefaultRuntimeBrokerID
+
+		if currentDefault == brokerID {
+			// Already the default, nothing to do
+			fmt.Printf("Broker '%s' is already the default for grove '%s'\n", brokerName, resp.Grove.Name)
+		} else if currentDefault == "" {
+			// No default set - the server should have auto-set it during provide,
+			// but set it explicitly to be sure
+			_, err := client.Groves().Update(ctx, resp.Grove.ID, &hubclient.UpdateGroveRequest{
+				DefaultRuntimeBrokerID: brokerID,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to set default broker: %w", err)
+			}
+			fmt.Printf("Broker '%s' set as default for grove '%s'\n", brokerName, resp.Grove.Name)
+		} else {
+			// Different default already set - resolve its name and confirm
+			currentDefaultName := currentDefault[:8] // fallback to truncated ID
+			currentBroker, err := client.RuntimeBrokers().Get(ctx, currentDefault)
+			if err == nil && currentBroker.Name != "" {
+				currentDefaultName = currentBroker.Name
+			}
+
+			if !hubsync.ShowChangeDefaultBrokerPrompt(resp.Grove.Name, currentDefaultName, brokerName, autoConfirm) {
+				fmt.Println("Default broker not changed.")
+			} else {
+				_, err := client.Groves().Update(ctx, resp.Grove.ID, &hubclient.UpdateGroveRequest{
+					DefaultRuntimeBrokerID: brokerID,
+				})
+				if err != nil {
+					return fmt.Errorf("failed to update default broker: %w", err)
+				}
+				fmt.Printf("Default broker for grove '%s' changed from '%s' to '%s'\n", resp.Grove.Name, currentDefaultName, brokerName)
+			}
+		}
+	}
 
 	return nil
 }

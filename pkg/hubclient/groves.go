@@ -128,10 +128,11 @@ type CreateGroveRequest struct {
 
 // UpdateGroveRequest is the request for updating a grove.
 type UpdateGroveRequest struct {
-	Name        string            `json:"name,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-	Visibility  string            `json:"visibility,omitempty"`
+	Name                   string            `json:"name,omitempty"`
+	Labels                 map[string]string `json:"labels,omitempty"`
+	Annotations            map[string]string `json:"annotations,omitempty"`
+	Visibility             string            `json:"visibility,omitempty"`
+	DefaultRuntimeBrokerID string            `json:"defaultRuntimeBrokerId,omitempty"`
 }
 
 // ListProvidersResponse is the response from listing grove providers.

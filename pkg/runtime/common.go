@@ -330,10 +330,21 @@ func runInteractiveCommand(command string, args ...string) error {
 	return cmd.Run()
 }
 
+// expandTildeTarget expands a ~/ prefix in a target path to the container user's
+// home directory. Paths without ~/ are returned unchanged.
+func expandTildeTarget(target, containerHome string) string {
+	if strings.HasPrefix(target, "~/") {
+		return filepath.Join(containerHome, target[2:])
+	}
+	return target
+}
+
 // writeFileSecrets writes file-type secrets to a staging directory and returns
 // bind-mount specs that should be added to the container run command.
 // The staging directory is created as a sibling of homeDir: <parent>/secrets/<name>/
-func writeFileSecrets(homeDir string, secrets []api.ResolvedSecret) ([]string, error) {
+// The containerHome parameter is the container user's home directory (e.g., /home/gemini)
+// and is used to expand ~/ prefixes in target paths.
+func writeFileSecrets(homeDir string, containerHome string, secrets []api.ResolvedSecret) ([]string, error) {
 	var mountSpecs []string
 	secretsDir := filepath.Join(filepath.Dir(homeDir), "secrets")
 
@@ -358,8 +369,11 @@ func writeFileSecrets(homeDir string, secrets []api.ResolvedSecret) ([]string, e
 			return nil, fmt.Errorf("failed to write secret file %s: %w", s.Name, err)
 		}
 
+		// Expand ~/ to the container user's home directory
+		containerTarget := expandTildeTarget(s.Target, containerHome)
+
 		// Bind-mount from host staging path to container target path (read-only)
-		mountSpecs = append(mountSpecs, fmt.Sprintf("%s:%s:ro", hostPath, s.Target))
+		mountSpecs = append(mountSpecs, fmt.Sprintf("%s:%s:ro", hostPath, containerTarget))
 	}
 
 	return mountSpecs, nil
@@ -402,7 +416,8 @@ type secretMapEntry struct {
 
 // writeSecretMap writes a secret-map.json manifest that the Apple container runtime
 // uses to copy file secrets from the shared volume to their target paths.
-func writeSecretMap(homeDir string, secrets []api.ResolvedSecret) error {
+// The containerHome parameter is used to expand ~/ prefixes in target paths.
+func writeSecretMap(homeDir string, containerHome string, secrets []api.ResolvedSecret) error {
 	var entries []secretMapEntry
 	for _, s := range secrets {
 		if s.Type != "file" {
@@ -410,7 +425,7 @@ func writeSecretMap(homeDir string, secrets []api.ResolvedSecret) error {
 		}
 		entries = append(entries, secretMapEntry{
 			Name:   s.Name,
-			Target: s.Target,
+			Target: expandTildeTarget(s.Target, containerHome),
 			Source: s.Name, // filename within secrets/ volume
 		})
 	}

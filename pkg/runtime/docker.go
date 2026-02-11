@@ -46,7 +46,7 @@ func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 	// Stage file and variable secrets before building args
 	var secretMountSpecs []string
 	if config.HomeDir != "" && len(config.ResolvedSecrets) > 0 {
-		mounts, err := writeFileSecrets(config.HomeDir, config.ResolvedSecrets)
+		mounts, err := writeFileSecrets(config.HomeDir, util.GetHomeDir(config.UnixUsername), config.ResolvedSecrets)
 		if err != nil {
 			return "", fmt.Errorf("failed to stage file secrets: %w", err)
 		}

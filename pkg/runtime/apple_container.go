@@ -45,13 +45,14 @@ func (r *AppleContainerRuntime) Name() string {
 func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
 	// Stage file, variable, and secret-map secrets before building args
 	if config.HomeDir != "" && len(config.ResolvedSecrets) > 0 {
-		if _, err := writeFileSecrets(config.HomeDir, config.ResolvedSecrets); err != nil {
+		containerHome := util.GetHomeDir(config.UnixUsername)
+		if _, err := writeFileSecrets(config.HomeDir, containerHome, config.ResolvedSecrets); err != nil {
 			return "", fmt.Errorf("failed to stage file secrets: %w", err)
 		}
 		if err := writeVariableSecrets(config.HomeDir, config.ResolvedSecrets); err != nil {
 			return "", fmt.Errorf("failed to write variable secrets: %w", err)
 		}
-		if err := writeSecretMap(config.HomeDir, config.ResolvedSecrets); err != nil {
+		if err := writeSecretMap(config.HomeDir, containerHome, config.ResolvedSecrets); err != nil {
 			return "", fmt.Errorf("failed to write secret map: %w", err)
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -211,7 +212,7 @@ func runSecretSet(cmd *cobra.Command, args []string) error {
 	// Handle @filename prefix for file secrets: read file content and base64-encode
 	if strings.HasPrefix(value, "@") {
 		filePath := value[1:]
-		// Expand ~ in file path
+		// Expand ~ in source file path for reading
 		if strings.HasPrefix(filePath, "~/") {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -227,6 +228,21 @@ func runSecretSet(cmd *cobra.Command, args []string) error {
 		// Default to file type when using @file syntax
 		if secretType == "" {
 			secretType = "file"
+		}
+		// Auto-set target from source file path if not explicitly provided
+		if secretTarget == "" {
+			absPath, err := filepath.Abs(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to resolve absolute path for %s: %w", filePath, err)
+			}
+			// Convert paths under the user's home directory to ~/ so they
+			// map to the container user's home directory at projection time.
+			home, err := os.UserHomeDir()
+			if err == nil && strings.HasPrefix(absPath, home+"/") {
+				secretTarget = "~/" + absPath[len(home)+1:]
+			} else {
+				secretTarget = absPath
+			}
 		}
 	}
 

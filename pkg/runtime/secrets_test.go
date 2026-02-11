@@ -52,7 +52,7 @@ func TestWriteFileSecrets(t *testing.T) {
 		},
 	}
 
-	mountSpecs, err := writeFileSecrets(homeDir, secrets)
+	mountSpecs, err := writeFileSecrets(homeDir, "/home/scion", secrets)
 	if err != nil {
 		t.Fatalf("writeFileSecrets failed: %v", err)
 	}
@@ -98,12 +98,74 @@ func TestWriteFileSecrets_NoFileSecrets(t *testing.T) {
 		{Name: "KEY", Type: "environment", Target: "KEY", Value: "val"},
 	}
 
-	mountSpecs, err := writeFileSecrets(homeDir, secrets)
+	mountSpecs, err := writeFileSecrets(homeDir, "/home/scion", secrets)
 	if err != nil {
 		t.Fatalf("writeFileSecrets failed: %v", err)
 	}
 	if len(mountSpecs) != 0 {
 		t.Errorf("expected 0 mount specs for non-file secrets, got %d", len(mountSpecs))
+	}
+}
+
+func TestWriteFileSecrets_TildeExpansion(t *testing.T) {
+	homeDir := t.TempDir()
+
+	secrets := []api.ResolvedSecret{
+		{
+			Name:   "SSH_KEY",
+			Type:   "file",
+			Target: "~/.ssh/id_rsa",
+			Value:  base64.StdEncoding.EncodeToString([]byte("ssh-key-content")),
+			Source: "user",
+		},
+		{
+			Name:   "ABS_CERT",
+			Type:   "file",
+			Target: "/etc/ssl/cert.pem",
+			Value:  base64.StdEncoding.EncodeToString([]byte("cert-content")),
+			Source: "user",
+		},
+	}
+
+	mountSpecs, err := writeFileSecrets(homeDir, "/home/gemini", secrets)
+	if err != nil {
+		t.Fatalf("writeFileSecrets failed: %v", err)
+	}
+
+	if len(mountSpecs) != 2 {
+		t.Fatalf("expected 2 mount specs, got %d", len(mountSpecs))
+	}
+
+	// Verify ~/ was expanded to the container home directory
+	secretsDir := filepath.Join(filepath.Dir(homeDir), "secrets")
+	expectedMount0 := filepath.Join(secretsDir, "SSH_KEY") + ":/home/gemini/.ssh/id_rsa:ro"
+	if mountSpecs[0] != expectedMount0 {
+		t.Errorf("expected mount spec %q, got %q", expectedMount0, mountSpecs[0])
+	}
+
+	// Verify absolute path is unchanged
+	expectedMount1 := filepath.Join(secretsDir, "ABS_CERT") + ":/etc/ssl/cert.pem:ro"
+	if mountSpecs[1] != expectedMount1 {
+		t.Errorf("expected mount spec %q, got %q", expectedMount1, mountSpecs[1])
+	}
+}
+
+func TestExpandTildeTarget(t *testing.T) {
+	tests := []struct {
+		target        string
+		containerHome string
+		expected      string
+	}{
+		{"~/.ssh/id_rsa", "/home/gemini", "/home/gemini/.ssh/id_rsa"},
+		{"~/config.json", "/home/scion", "/home/scion/config.json"},
+		{"/etc/ssl/cert.pem", "/home/gemini", "/etc/ssl/cert.pem"},
+		{"~", "/home/gemini", "~"}, // bare ~ without / is not expanded
+	}
+	for _, tc := range tests {
+		result := expandTildeTarget(tc.target, tc.containerHome)
+		if result != tc.expected {
+			t.Errorf("expandTildeTarget(%q, %q) = %q, want %q", tc.target, tc.containerHome, result, tc.expected)
+		}
 	}
 }
 
@@ -177,7 +239,7 @@ func TestWriteSecretMap(t *testing.T) {
 		{Name: "ENV", Type: "environment", Target: "ENV", Value: "val", Source: "user"},
 	}
 
-	if err := writeSecretMap(homeDir, secrets); err != nil {
+	if err := writeSecretMap(homeDir, "/home/scion", secrets); err != nil {
 		t.Fatalf("writeSecretMap failed: %v", err)
 	}
 
@@ -211,7 +273,7 @@ func TestWriteSecretMap_NoFileSecrets(t *testing.T) {
 		{Name: "KEY", Type: "environment", Target: "KEY", Value: "val"},
 	}
 
-	if err := writeSecretMap(homeDir, secrets); err != nil {
+	if err := writeSecretMap(homeDir, "/home/scion", secrets); err != nil {
 		t.Fatalf("writeSecretMap failed: %v", err)
 	}
 

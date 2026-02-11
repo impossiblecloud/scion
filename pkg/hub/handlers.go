@@ -3165,8 +3165,8 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 
 	// Validate file-specific constraints
 	if secretType == store.SecretTypeFile {
-		if !strings.HasPrefix(target, "/") {
-			ValidationError(w, "file secret target must be an absolute path", map[string]interface{}{
+		if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
+			ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{
 				"field": "target",
 				"value": target,
 			})
@@ -3479,8 +3479,8 @@ func (s *Server) handleGroveSecretByKey(w http.ResponseWriter, r *http.Request, 
 			target = key
 		}
 		if secretType == store.SecretTypeFile {
-			if !strings.HasPrefix(target, "/") {
-				ValidationError(w, "file secret target must be an absolute path", map[string]interface{}{"field": "target", "value": target})
+			if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
+				ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{"field": "target", "value": target})
 				return
 			}
 			if len(req.Value) > 64*1024 {
@@ -3865,8 +3865,8 @@ func (s *Server) handleBrokerSecretByKey(w http.ResponseWriter, r *http.Request,
 			target = key
 		}
 		if secretType == store.SecretTypeFile {
-			if !strings.HasPrefix(target, "/") {
-				ValidationError(w, "file secret target must be an absolute path", map[string]interface{}{"field": "target", "value": target})
+			if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
+				ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{"field": "target", "value": target})
 				return
 			}
 			if len(req.Value) > 64*1024 {

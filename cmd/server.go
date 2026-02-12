@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -488,6 +489,21 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			}
 			hubSrv.SetStorage(stor)
 			log.Printf("Local storage configured: %s", storageDir)
+		} else {
+			// Auto-initialize local storage as fallback for development/local use
+			defaultStorageDir := filepath.Join(globalDir, "storage")
+			log.Printf("WARNING: No storage backend configured. Using local filesystem storage at: %s", defaultStorageDir)
+			log.Printf("  For production use, configure --storage-bucket (GCS) or --storage-dir (explicit local path)")
+			storageCfg := storage.Config{
+				Provider:  storage.ProviderLocal,
+				LocalPath: defaultStorageDir,
+				Bucket:    "local",
+			}
+			stor, err := storage.New(ctx, storageCfg)
+			if err != nil {
+				return fmt.Errorf("failed to initialize local storage fallback: %w", err)
+			}
+			hubSrv.SetStorage(stor)
 		}
 
 		// Initialize secret backend

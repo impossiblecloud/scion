@@ -7,6 +7,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "clean": "rm -rf node_modules dist public/assets",
     "dev": "tsx watch --clear-screen=false src/server/index.ts",
     "dev:client": "vite --mode development",
     "dev:full": "npm run build:client:dev && npm run dev",
@@ -32,7 +33,7 @@
     "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
-    "koa": "^2.16.0",
+    "koa": "^3.1.0",
     "koa-bodyparser": "^4.4.1",
     "koa-session": "^7.0.2",
     "koa-static": "^5.0.0",
@@ -40,7 +41,7 @@
     "ws": "^8.16.0"
   },
   "devDependencies": {
-    "@types/koa": "^2.15.0",
+    "@types/koa": "^3.0.0",
     "@types/koa__cors": "^5.0.0",
     "@types/koa__router": "^12.0.4",
     "@types/koa-bodyparser": "^4.3.12",

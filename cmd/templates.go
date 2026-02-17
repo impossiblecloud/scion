@@ -1062,7 +1062,38 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 	fmt.Println("Finalizing template...")
 	template, err := hubCtx.Client.Templates().Finalize(ctx, templateID, manifest)
 	if err != nil {
-		return fmt.Errorf("failed to finalize template: %w", err)
+		// If finalize failed because files are missing from storage (e.g., stale
+		// manifest from a previous incomplete sync or storage data loss), retry
+		// by re-uploading all files.
+		if !strings.Contains(err.Error(), "file not found") {
+			return fmt.Errorf("failed to finalize template: %w", err)
+		}
+
+		fmt.Println("Some files missing from storage, re-uploading all files...")
+		retryResp, retryErr := hubCtx.Client.Templates().RequestUploadURLs(ctx, templateID, fileReqs)
+		if retryErr != nil {
+			return fmt.Errorf("failed to get upload URLs for retry: %w", retryErr)
+		}
+		for _, urlInfo := range retryResp.UploadURLs {
+			fileInfo := localFileMap[urlInfo.Path]
+			if fileInfo == nil {
+				continue
+			}
+			f, openErr := os.Open(fileInfo.FullPath)
+			if openErr != nil {
+				return fmt.Errorf("failed to open %s: %w", fileInfo.Path, openErr)
+			}
+			uploadErr := hubCtx.Client.Templates().UploadFile(ctx, urlInfo.URL, urlInfo.Method, urlInfo.Headers, f)
+			f.Close()
+			if uploadErr != nil {
+				return fmt.Errorf("failed to upload %s: %w", fileInfo.Path, uploadErr)
+			}
+			fmt.Printf("  Re-uploaded: %s\n", fileInfo.Path)
+		}
+		template, err = hubCtx.Client.Templates().Finalize(ctx, templateID, manifest)
+		if err != nil {
+			return fmt.Errorf("failed to finalize template after retry: %w", err)
+		}
 	}
 
 	if isJSONOutput() {

@@ -56,12 +56,9 @@ USE_GCS=false
 VERBOSE=false
 STORAGE_BUCKET=""
 
-# Cross-platform file size function (stat -c%s is Linux-only, macOS uses -f%s)
+# Cross-platform file size in bytes (wc -c is POSIX-portable)
 file_size() {
-    if stat -c%s "$1" 2>/dev/null; then
-        return
-    fi
-    stat -f%s "$1"
+    wc -c < "$1" | tr -d '[:space:]'
 }
 
 # Parse arguments

@@ -222,6 +222,7 @@ var spaShellTemplate = `<!DOCTYPE html>
 
         /* Prevent FOUC for custom elements */
         scion-app:not(:defined),
+        scion-login-page:not(:defined),
         scion-nav:not(:defined),
         scion-header:not(:defined),
         scion-breadcrumb:not(:defined),
@@ -262,7 +263,7 @@ var spaShellTemplate = `<!DOCTYPE html>
     </script>
 </head>
 <body>
-    <div id="app"><scion-app></scion-app></div>
+    <div id="app">{{if .IsLoginPage}}<scion-login-page{{if .GoogleEnabled}} googleEnabled{{end}}{{if .GitHubEnabled}} githubEnabled{{end}}></scion-login-page>{{else}}<scion-app></scion-app>{{end}}</div>
 
     <!-- Client entry point -->
     <script type="module" src="/assets/main.js"></script>
@@ -272,6 +273,9 @@ var spaShellTemplate = `<!DOCTYPE html>
 // spaShellData holds the template data for the SPA shell.
 type spaShellData struct {
 	ShoelaceVersion string
+	IsLoginPage     bool
+	GoogleEnabled   bool
+	GitHubEnabled   bool
 }
 
 // NewWebServer creates a new web frontend server.
@@ -447,8 +451,14 @@ func (ws *WebServer) spaHandler() http.HandlerFunc {
 			return
 		}
 
+		isLogin := r.URL.Path == "/login"
 		data := spaShellData{
 			ShoelaceVersion: shoelaceVersion,
+			IsLoginPage:     isLogin,
+		}
+		if isLogin && ws.oauthService != nil {
+			data.GoogleEnabled = ws.oauthService.IsProviderConfiguredForClient(OAuthClientTypeWeb, "google")
+			data.GitHubEnabled = ws.oauthService.IsProviderConfiguredForClient(OAuthClientTypeWeb, "github")
 		}
 		if err := ws.shellTmpl.Execute(w, data); err != nil {
 			slog.Error("Failed to render SPA shell", "error", err)

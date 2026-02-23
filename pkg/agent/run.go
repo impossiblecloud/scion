@@ -256,6 +256,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		opts.Env = make(map[string]string)
 	}
 	opts.Env["SCION_AGENT_NAME"] = opts.Name
+	opts.Env["SCION_GROVE"] = groveName
 	if template != "" {
 		opts.Env["SCION_TEMPLATE_NAME"] = template
 	} else {

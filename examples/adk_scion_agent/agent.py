@@ -25,7 +25,7 @@ if not os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
 # ---------------------------------------------------------------------------
 # Model configuration
 # ---------------------------------------------------------------------------
-MODEL = os.environ.get("ADK_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("ADK_MODEL", "gemini-3-flash-preview")
 
 # ---------------------------------------------------------------------------
 # Agent instruction

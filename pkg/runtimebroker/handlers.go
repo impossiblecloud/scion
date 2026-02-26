@@ -399,6 +399,17 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			if s.config.Debug {
+				targetKeys := make([]string, 0, len(secretTargets))
+				for k := range secretTargets {
+					targetKeys = append(targetKeys, k)
+				}
+				slog.Debug("Env-gather: resolved secret targets available",
+					"secretTargetKeys", targetKeys,
+					"resolvedSecretsCount", len(req.ResolvedSecrets),
+				)
+			}
+
 			var hubHas, brokerHas, needs []string
 			for _, key := range required {
 				val, hasVal := env[key]

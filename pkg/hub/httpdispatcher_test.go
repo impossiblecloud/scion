@@ -1624,3 +1624,262 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate_NoGroveSlug_LocalPathGrove(t *t
 		t.Errorf("expected empty Workspace for local-path grove, got '%s'", mockClient.lastCreateReq.Config.Workspace)
 	}
 }
+
+func TestBuildCreateRequest_ResolvesStorageEnvVars(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	// Create a runtime broker
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Store a user-scoped env var
+	envVar := &store.EnvVar{
+		ID:      "ev-1",
+		Key:     "GEMINI_API_KEY",
+		Value:   "stored-key-value",
+		Scope:   "user",
+		ScopeID: "user-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, envVar); err != nil {
+		t.Fatalf("failed to create env var: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		OwnerID:         "user-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig:   &store.AgentAppliedConfig{},
+	}
+
+	req, err := dispatcher.buildCreateRequest(ctx, agent, "TestBuildCreateRequest")
+	if err != nil {
+		t.Fatalf("buildCreateRequest failed: %v", err)
+	}
+
+	if req.ResolvedEnv == nil {
+		t.Fatal("expected ResolvedEnv to be non-nil")
+	}
+	if req.ResolvedEnv["GEMINI_API_KEY"] != "stored-key-value" {
+		t.Errorf("expected GEMINI_API_KEY='stored-key-value', got %q", req.ResolvedEnv["GEMINI_API_KEY"])
+	}
+}
+
+func TestBuildCreateRequest_ConfigEnvOverridesStorage(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	// Create a runtime broker
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Store a user-scoped env var with the same key as config env
+	envVar := &store.EnvVar{
+		ID:      "ev-1",
+		Key:     "MY_KEY",
+		Value:   "storage-value",
+		Scope:   "user",
+		ScopeID: "user-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, envVar); err != nil {
+		t.Fatalf("failed to create env var: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		OwnerID:         "user-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig: &store.AgentAppliedConfig{
+			Env: map[string]string{
+				"MY_KEY": "config-value",
+			},
+		},
+	}
+
+	req, err := dispatcher.buildCreateRequest(ctx, agent, "TestBuildCreateRequest")
+	if err != nil {
+		t.Fatalf("buildCreateRequest failed: %v", err)
+	}
+
+	// Config value should win over storage value
+	if req.ResolvedEnv["MY_KEY"] != "config-value" {
+		t.Errorf("expected config value to override storage: got %q", req.ResolvedEnv["MY_KEY"])
+	}
+}
+
+func TestBuildCreateRequest_ResolvesGroveAndUserScopes(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	// Create grove and broker
+	grove := &store.Grove{
+		ID:   "grove-1",
+		Name: "test-grove",
+		Slug: "test-grove",
+	}
+	if err := memStore.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Store a grove-scoped env var
+	groveEnv := &store.EnvVar{
+		ID:      "ev-grove",
+		Key:     "SHARED_KEY",
+		Value:   "grove-value",
+		Scope:   "grove",
+		ScopeID: "grove-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, groveEnv); err != nil {
+		t.Fatalf("failed to create grove env var: %v", err)
+	}
+
+	// Store a user-scoped env var with the same key (higher precedence)
+	userEnv := &store.EnvVar{
+		ID:      "ev-user",
+		Key:     "SHARED_KEY",
+		Value:   "user-value",
+		Scope:   "user",
+		ScopeID: "user-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, userEnv); err != nil {
+		t.Fatalf("failed to create user env var: %v", err)
+	}
+
+	// Store a grove-only env var
+	groveOnly := &store.EnvVar{
+		ID:      "ev-grove-only",
+		Key:     "GROVE_ONLY_KEY",
+		Value:   "grove-only-value",
+		Scope:   "grove",
+		ScopeID: "grove-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, groveOnly); err != nil {
+		t.Fatalf("failed to create grove-only env var: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		OwnerID:         "user-1",
+		GroveID:         "grove-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig:   &store.AgentAppliedConfig{},
+	}
+
+	req, err := dispatcher.buildCreateRequest(ctx, agent, "TestBuildCreateRequest")
+	if err != nil {
+		t.Fatalf("buildCreateRequest failed: %v", err)
+	}
+
+	// User scope should take precedence over grove scope
+	if req.ResolvedEnv["SHARED_KEY"] != "user-value" {
+		t.Errorf("expected user-scoped value to win: got %q", req.ResolvedEnv["SHARED_KEY"])
+	}
+
+	// Grove-only key should also be present
+	if req.ResolvedEnv["GROVE_ONLY_KEY"] != "grove-only-value" {
+		t.Errorf("expected GROVE_ONLY_KEY='grove-only-value', got %q", req.ResolvedEnv["GROVE_ONLY_KEY"])
+	}
+}
+
+func TestDispatchAgentCreate_IncludesStorageEnvVars(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	// Create a runtime broker
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Store user-scoped env vars
+	envVar := &store.EnvVar{
+		ID:      "ev-1",
+		Key:     "API_TOKEN",
+		Value:   "secret-token-123",
+		Scope:   "user",
+		ScopeID: "user-1",
+	}
+	if err := memStore.CreateEnvVar(ctx, envVar); err != nil {
+		t.Fatalf("failed to create env var: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		OwnerID:         "user-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+		},
+	}
+
+	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("DispatchAgentCreate failed: %v", err)
+	}
+
+	if !mockClient.createCalled {
+		t.Fatal("expected CreateAgent to be called")
+	}
+
+	// Verify that storage env vars are included in the request sent to the broker
+	if mockClient.lastCreateReq.ResolvedEnv == nil {
+		t.Fatal("expected ResolvedEnv to be non-nil")
+	}
+	if mockClient.lastCreateReq.ResolvedEnv["API_TOKEN"] != "secret-token-123" {
+		t.Errorf("expected API_TOKEN='secret-token-123', got %q",
+			mockClient.lastCreateReq.ResolvedEnv["API_TOKEN"])
+	}
+}

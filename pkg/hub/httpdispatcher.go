@@ -609,6 +609,24 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 		}
 	}
 
+	// Resolve env vars from Hub storage (user/grove/broker scopes) and merge.
+	// Storage env vars fill in keys not already set by explicit config env vars.
+	envFromStorage, err := d.resolveEnvFromStorage(ctx, agent)
+	if err != nil {
+		if d.debug {
+			slog.Warn("buildCreateRequest: failed to resolve env from storage", "error", err)
+		}
+	} else if len(envFromStorage) > 0 {
+		if req.ResolvedEnv == nil {
+			req.ResolvedEnv = make(map[string]string)
+		}
+		for k, v := range envFromStorage {
+			if _, exists := req.ResolvedEnv[k]; !exists {
+				req.ResolvedEnv[k] = v
+			}
+		}
+	}
+
 	// Include template secrets declarations for broker env-gather
 	if agent.AppliedConfig != nil && agent.AppliedConfig.TemplateID != "" {
 		tmpl, err := d.store.GetTemplate(ctx, agent.AppliedConfig.TemplateID)
@@ -637,6 +655,20 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 		if d.debug {
 			slog.Debug("Resolved secrets for agent", "count", len(resolvedSecrets))
 		}
+	}
+
+	// Log a summary of env resolution sources
+	if d.debug {
+		configEnvCount := 0
+		if agent.AppliedConfig != nil {
+			configEnvCount = len(agent.AppliedConfig.Env)
+		}
+		slog.Debug("buildCreateRequest: env resolution summary",
+			"configEnvCount", configEnvCount,
+			"storageEnvCount", len(envFromStorage),
+			"resolvedSecretsCount", len(resolvedSecrets),
+			"totalResolvedEnvCount", len(req.ResolvedEnv),
+		)
 	}
 
 	// In dev-auth mode, inject the dev token so agents can use it as fallback auth
@@ -753,22 +785,6 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreateWithGather(ctx context.Context,
 		return nil, err
 	}
 	req.GatherEnv = true
-
-	// Resolve env vars from Hub storage and merge with AppliedConfig.Env
-	envSources, err := d.resolveEnvFromStorage(ctx, agent)
-	if err != nil && d.debug {
-		slog.Warn("Failed to resolve env vars from storage for gather", "error", err)
-	}
-	if len(envSources) > 0 {
-		if req.ResolvedEnv == nil {
-			req.ResolvedEnv = make(map[string]string)
-		}
-		for k, v := range envSources {
-			if _, exists := req.ResolvedEnv[k]; !exists {
-				req.ResolvedEnv[k] = v
-			}
-		}
-	}
 
 	// Track which scope provided each key
 	req.EnvSources = d.buildEnvSources(ctx, agent, req.ResolvedEnv)

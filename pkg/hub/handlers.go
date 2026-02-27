@@ -2250,6 +2250,12 @@ func (s *Server) handleGroveRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for nested /workspace/archive path (download workspace as zip)
+	if subPath == "workspace/archive" {
+		s.handleGroveWorkspaceArchive(w, r, groveID)
+		return
+	}
+
 	// Check for nested /workspace/files path
 	if strings.HasPrefix(subPath, "workspace/files") {
 		filePath := strings.TrimPrefix(subPath, "workspace/files")

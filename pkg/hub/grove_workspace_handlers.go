@@ -15,9 +15,11 @@
 package hub
 
 import (
+	"archive/zip"
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -82,6 +84,8 @@ func (s *Server) handleGroveWorkspace(w http.ResponseWriter, r *http.Request, gr
 	switch {
 	case r.Method == http.MethodGet && filePath == "":
 		s.handleGroveWorkspaceList(w, workspacePath)
+	case r.Method == http.MethodGet && filePath != "":
+		s.handleGroveWorkspaceDownload(w, workspacePath, filePath)
 	case r.Method == http.MethodPost && filePath == "":
 		s.handleGroveWorkspaceUpload(w, r, workspacePath)
 	case r.Method == http.MethodDelete && filePath != "":
@@ -256,6 +260,161 @@ func (s *Server) handleGroveWorkspaceUpload(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, GroveWorkspaceUploadResponse{
 		Files: uploaded,
 	})
+}
+
+// handleGroveWorkspaceDownload serves a single file from a grove workspace for download.
+func (s *Server) handleGroveWorkspaceDownload(w http.ResponseWriter, workspacePath, filePath string) {
+	// Validate the file path
+	if err := validateWorkspaceFilePath(filePath); err != nil {
+		BadRequest(w, fmt.Sprintf("Invalid file path %q: %s", filePath, err.Error()))
+		return
+	}
+
+	fullPath := filepath.Join(workspacePath, filePath)
+
+	// Check file exists and is not a directory
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			NotFound(w, "File")
+			return
+		}
+		InternalError(w)
+		return
+	}
+	if info.IsDir() {
+		BadRequest(w, "Cannot download a directory")
+		return
+	}
+
+	// Open the file
+	f, err := os.Open(fullPath)
+	if err != nil {
+		InternalError(w)
+		return
+	}
+	defer f.Close()
+
+	// Determine content type from extension, default to octet-stream
+	fileName := filepath.Base(filePath)
+	contentType := mime.TypeByExtension(filepath.Ext(fileName))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+
+	io.Copy(w, f)
+}
+
+// handleGroveWorkspaceArchive creates a zip archive of the entire workspace and serves it for download.
+func (s *Server) handleGroveWorkspaceArchive(w http.ResponseWriter, r *http.Request, groveID string) {
+	ctx := r.Context()
+
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+
+	// Look up the grove
+	grove, err := s.store.GetGrove(ctx, groveID)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Only hub-native groves (no git remote) have a managed workspace
+	if grove.GitRemote != "" {
+		Conflict(w, "Workspace file management is only available for hub-native groves")
+		return
+	}
+
+	// Resolve workspace path
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	if err != nil {
+		InternalError(w)
+		return
+	}
+
+	// Check workspace directory exists
+	if _, err := os.Stat(workspacePath); err != nil {
+		if os.IsNotExist(err) {
+			NotFound(w, "Workspace")
+			return
+		}
+		InternalError(w)
+		return
+	}
+
+	archiveName := grove.Slug + "-workspace.zip"
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, archiveName))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	err = filepath.WalkDir(workspacePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(workspacePath, path)
+		if err != nil {
+			return err
+		}
+
+		if relPath == "." {
+			return nil
+		}
+
+		// Skip the .scion directory
+		if relPath == ".scion" || strings.HasPrefix(relPath, ".scion/") || strings.HasPrefix(relPath, ".scion"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		// Use the relative path so directory structure is preserved
+		header.Name = relPath
+		header.Method = zip.Deflate
+
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		_, err = io.Copy(writer, f)
+		return err
+	})
+
+	if err != nil {
+		// At this point we've already started writing, so we can't send an error response.
+		// The zip will be truncated/corrupt, which the client will notice.
+		return
+	}
 }
 
 // handleGroveWorkspaceDelete deletes a file from a grove workspace.

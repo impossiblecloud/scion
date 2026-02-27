@@ -17,6 +17,7 @@
 package hub
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -365,6 +366,129 @@ func TestGroveWorkspaceDelete_CleansEmptyDirs(t *testing.T) {
 }
 
 // ============================================================================
+// Download Tests
+// ============================================================================
+
+func TestGroveWorkspaceDownload_Success(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, workspacePath := createTestHubNativeGrove(t, srv, "WS Download OK")
+
+	content := []byte("hello download")
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "readme.txt"), content, 0644))
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/readme.txt", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	assert.Equal(t, "hello download", rec.Body.String())
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), "readme.txt")
+	assert.Equal(t, "14", rec.Header().Get("Content-Length"))
+}
+
+func TestGroveWorkspaceDownload_NestedFile(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, workspacePath := createTestHubNativeGrove(t, srv, "WS Download Nested")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(workspacePath, "src"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "src", "main.go"), []byte("package main"), 0644))
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/src/main.go", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	assert.Equal(t, "package main", rec.Body.String())
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), "main.go")
+}
+
+func TestGroveWorkspaceDownload_NotFound(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, _ := createTestHubNativeGrove(t, srv, "WS Download NF")
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/nonexistent.txt", grove.ID), nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestGroveWorkspaceDownload_ScionDirRejected(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, _ := createTestHubNativeGrove(t, srv, "WS Download Scion")
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/.scion/settings.yaml", grove.ID), nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// ============================================================================
+// Archive Download Tests
+// ============================================================================
+
+func TestGroveWorkspaceArchive_Success(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, workspacePath := createTestHubNativeGrove(t, srv, "WS Archive OK")
+
+	// Create some test files
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "hello.txt"), []byte("hello world"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(workspacePath, "subdir"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "subdir", "nested.txt"), []byte("nested"), 0644))
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/archive", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body length: %d", rec.Body.Len())
+
+	assert.Equal(t, "application/zip", rec.Header().Get("Content-Type"))
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), ".zip")
+
+	// Verify the zip contents
+	zipReader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	require.NoError(t, err)
+
+	files := make(map[string]string)
+	for _, f := range zipReader.File {
+		rc, err := f.Open()
+		require.NoError(t, err)
+		content, err := io.ReadAll(rc)
+		require.NoError(t, err)
+		rc.Close()
+		files[f.Name] = string(content)
+	}
+
+	assert.Equal(t, "hello world", files["hello.txt"])
+	assert.Equal(t, "nested", files[filepath.Join("subdir", "nested.txt")])
+	// .scion directory should not be in the archive
+	for name := range files {
+		assert.False(t, name == ".scion" || len(name) > 6 && name[:6] == ".scion", "should not contain .scion files: %s", name)
+	}
+}
+
+func TestGroveWorkspaceArchive_EmptyWorkspace(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, _ := createTestHubNativeGrove(t, srv, "WS Archive Empty")
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/archive", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Should be a valid empty zip
+	assert.Equal(t, "application/zip", rec.Header().Get("Content-Type"))
+	zipReader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	require.NoError(t, err)
+	// Only .scion files would be present but those are excluded
+	for _, f := range zipReader.File {
+		assert.False(t, f.Name == ".scion" || len(f.Name) > 6 && f.Name[:6] == ".scion", "should not contain .scion files")
+	}
+}
+
+func TestGroveWorkspaceArchive_GitGroveRejected(t *testing.T) {
+	srv, _ := testServer(t)
+	grove := createTestGitGrove(t, srv, "Git Archive", "github.com/test/ws-archive")
+
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/archive", grove.ID), nil)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestGroveWorkspaceArchive_MethodNotAllowed(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, _ := createTestHubNativeGrove(t, srv, "WS Archive Method")
+
+	rec := doRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/v1/groves/%s/workspace/archive", grove.ID), nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+// ============================================================================
 // Auth Tests
 // ============================================================================
 
@@ -403,7 +527,6 @@ func TestGroveWorkspace_MethodNotAllowed(t *testing.T) {
 	}{
 		{http.MethodPut, fmt.Sprintf("/api/v1/groves/%s/workspace/files", grove.ID)},
 		{http.MethodPatch, fmt.Sprintf("/api/v1/groves/%s/workspace/files", grove.ID)},
-		{http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/some-file.txt", grove.ID)},
 		{http.MethodPost, fmt.Sprintf("/api/v1/groves/%s/workspace/files/some-file.txt", grove.ID)},
 	}
 

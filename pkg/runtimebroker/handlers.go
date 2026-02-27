@@ -839,12 +839,13 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
-	// Read optional task, grovePath, groveSlug, and resolvedEnv from request body
+	// Read optional task, grovePath, groveSlug, harnessConfig, and resolvedEnv from request body
 	var startReq struct {
-		Task        string            `json:"task"`
-		GrovePath   string            `json:"grovePath"`
-		GroveSlug   string            `json:"groveSlug"`
-		ResolvedEnv map[string]string `json:"resolvedEnv"`
+		Task          string            `json:"task"`
+		GrovePath     string            `json:"grovePath"`
+		GroveSlug     string            `json:"groveSlug"`
+		HarnessConfig string            `json:"harnessConfig"`
+		ResolvedEnv   map[string]string `json:"resolvedEnv"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&startReq); err != nil {
@@ -852,7 +853,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 
-	slog.Debug("startAgent called", "id", id, "task", startReq.Task, "grovePath", startReq.GrovePath, "groveSlug", startReq.GroveSlug, "resolvedEnvCount", len(startReq.ResolvedEnv))
+	slog.Debug("startAgent called", "id", id, "task", startReq.Task, "grovePath", startReq.GrovePath, "groveSlug", startReq.GroveSlug, "harnessConfig", startReq.HarnessConfig, "resolvedEnvCount", len(startReq.ResolvedEnv))
 
 	// For hub-native groves (GroveSlug set, no local provider path), resolve
 	// the conventional grove path (~/.scion/groves/<slug>/) so the agent is
@@ -874,8 +875,9 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 
 	// Build start options
 	opts := api.StartOptions{
-		Name: id,
-		Task: startReq.Task,
+		Name:          id,
+		Task:          startReq.Task,
+		HarnessConfig: startReq.HarnessConfig,
 	}
 
 	// Apply resolved env vars from Hub (API keys, secrets, etc.)

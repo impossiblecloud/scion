@@ -86,7 +86,7 @@ func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, bro
 	}, nil
 }
 
-func (m *mockRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
+func (m *mockRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
 	m.startCalled = true
 	m.lastBrokerID = brokerID
 	m.lastEndpoint = brokerEndpoint

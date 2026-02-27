@@ -64,7 +64,7 @@ func (c *ControlChannelBrokerClient) CreateAgent(ctx context.Context, brokerID, 
 }
 
 // StartAgent starts an agent via control channel.
-func (c *ControlChannelBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
+func (c *ControlChannelBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
 	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/start", agentID)
 
@@ -77,6 +77,9 @@ func (c *ControlChannelBrokerClient) StartAgent(ctx context.Context, brokerID, b
 	}
 	if groveSlug != "" {
 		payload["groveSlug"] = groveSlug
+	}
+	if harnessConfig != "" {
+		payload["harnessConfig"] = harnessConfig
 	}
 	if len(resolvedEnv) > 0 {
 		payload["resolvedEnv"] = resolvedEnv
@@ -307,11 +310,11 @@ func (c *HybridBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEn
 }
 
 // StartAgent starts an agent, preferring control channel.
-func (c *HybridBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
+func (c *HybridBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, resolvedEnv)
+		return c.controlChannel.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig, resolvedEnv)
 	}
-	return c.httpClient.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, resolvedEnv)
+	return c.httpClient.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig, resolvedEnv)
 }
 
 // StopAgent stops an agent, preferring control channel.

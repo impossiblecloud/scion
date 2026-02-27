@@ -101,7 +101,7 @@ func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, bro
 
 // StartAgent starts an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
+func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string) (*RemoteAgentResponse, error) {
 	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
@@ -118,6 +118,9 @@ func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brok
 	}
 	if groveSlug != "" {
 		payload["groveSlug"] = groveSlug
+	}
+	if harnessConfig != "" {
+		payload["harnessConfig"] = harnessConfig
 	}
 	if len(resolvedEnv) > 0 {
 		payload["resolvedEnv"] = resolvedEnv
@@ -1036,7 +1039,13 @@ func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *sto
 	}
 
 	// Use agent name as identifier (runtime broker uses name or ID)
-	resp, err := d.client.StartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, task, grovePath, groveSlug, resolvedEnv)
+	// Pass the agent's harness config so the broker starts with the correct harness.
+	harnessConfig := ""
+	if agent.AppliedConfig != nil {
+		harnessConfig = agent.AppliedConfig.Harness
+	}
+
+	resp, err := d.client.StartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, task, grovePath, groveSlug, harnessConfig, resolvedEnv)
 	if err != nil {
 		return err
 	}

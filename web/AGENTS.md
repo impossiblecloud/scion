@@ -113,6 +113,54 @@ web/
 - **Terminal:** xterm.js for terminal sessions
 - **Server:** Go (`scion` binary with `--enable-web`)
 
+## Icon Reference
+
+All icons use the Shoelace `<sl-icon>` component, which provides [Bootstrap Icons](https://icons.getbootstrap.com/). Use these consistently when building new UI features.
+
+### Resource Type Icons
+
+| Resource Type | Icon Name | Usage |
+|---------------|-----------|-------|
+| **Agents** | `cpu` | Agent lists, detail pages, breadcrumbs, group members |
+| **Groves** | `folder` | Navigation, dashboard, breadcrumbs |
+| **Brokers** | `hdd-rack` | Navigation, broker lists, broker detail |
+| **Users** | `people` | Navigation, user lists, user groups |
+| **Groups** | `diagram-3` | Navigation, group lists, group detail |
+| **Settings** | `gear` | Navigation, grove settings |
+| **Dashboard** | `house` | Navigation |
+
+### Grove Variant Icons
+
+| Variant | Icon Name | Usage |
+|---------|-----------|-------|
+| **Git-backed grove** | `diagram-3` | Grove lists, grove detail header |
+| **Hub workspace** | `folder-fill` | Grove lists, grove detail header |
+| **Empty state** | `folder2-open` | No-groves placeholder |
+
+### Profile & Config Icons
+
+| Resource Type | Icon Name | Usage |
+|---------------|-----------|-------|
+| **Environment Variables** | `terminal` | Profile nav, env var pages, dashboard |
+| **Secrets** | `shield-lock` | Profile nav, secrets pages |
+
+### Individual vs. Collection Icons
+
+| Context | Icon Name | Usage |
+|---------|-----------|-------|
+| **Single user** | `person` | Group member lists |
+| **User avatar** | `person-circle` | Header, profile nav |
+| **User collection** | `people` | Navigation, admin pages |
+
+### Common Action Icons
+
+| Action | Icon Name | Usage |
+|--------|-----------|-------|
+| **Create/Add** | `plus-lg` | Create agent, add items |
+| **Create grove** | `folder-plus` | Create grove action |
+| **Back/Return** | `arrow-left-circle` | Return links |
+| **Recent activity** | `clock-history` | Dashboard activity section |
+
 ## Key Patterns
 
 ### Creating Lit Components

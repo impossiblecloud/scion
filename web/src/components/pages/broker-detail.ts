@@ -626,7 +626,7 @@ export class ScionPageBrokerDetail extends LitElement {
           ? html`
               <div class="stat">
                 <span class="stat-label">Created By</span>
-                <span class="stat-value-sm">${this.broker.createdBy}</span>
+                <span class="stat-value-sm">${this.broker.createdByName || this.broker.createdBy}</span>
               </div>
             `
           : ''}

@@ -382,6 +382,27 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce broker-level dispatch authorization: only the broker owner can create agents on it
+	if runtimeBrokerID != "" {
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			runtimeBroker, brokerErr := s.store.GetRuntimeBroker(ctx, runtimeBrokerID)
+			if brokerErr != nil {
+				writeErrorFromErr(w, brokerErr, "")
+				return
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type:    "broker",
+				ID:      runtimeBroker.ID,
+				OwnerID: runtimeBroker.CreatedBy,
+			}, ActionDispatch)
+			if !decision.Allowed {
+				writeError(w, http.StatusForbidden, ErrCodeForbidden,
+					"You don't have permission to create agents on this broker", nil)
+				return
+			}
+		}
+	}
+
 	// Check if the agent already exists (e.g. created via "scion create" for later start).
 	// If it exists in "created" status, start it instead of creating a duplicate.
 	// If it doesn't exist, fall through to create it.
@@ -2461,6 +2482,27 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		return
 	}
 
+	// Enforce broker-level dispatch authorization: only the broker owner can create agents on it
+	if runtimeBrokerID != "" {
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			runtimeBroker, brokerErr := s.store.GetRuntimeBroker(ctx, runtimeBrokerID)
+			if brokerErr != nil {
+				writeErrorFromErr(w, brokerErr, "")
+				return
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type:    "broker",
+				ID:      runtimeBroker.ID,
+				OwnerID: runtimeBroker.CreatedBy,
+			}, ActionDispatch)
+			if !decision.Allowed {
+				writeError(w, http.StatusForbidden, ErrCodeForbidden,
+					"You don't have permission to create agents on this broker", nil)
+				return
+			}
+		}
+	}
+
 	// Check if the agent already exists. Handle stale cleanup, restart, etc.
 	slug, err := api.ValidateAgentName(req.Name)
 	if err != nil {
@@ -3088,14 +3130,22 @@ type ListRuntimeBrokersResponse struct {
 // for the grove on each broker.
 type RuntimeBrokerWithProvider struct {
 	store.RuntimeBroker
-	LocalPath string `json:"localPath,omitempty"` // Filesystem path to the grove on this broker
+	LocalPath string        `json:"localPath,omitempty"` // Filesystem path to the grove on this broker
+	Cap       *Capabilities `json:"_capabilities,omitempty"`
 }
 
 // ListRuntimeBrokersWithProviderResponse is returned when filtering by groveId.
 type ListRuntimeBrokersWithProviderResponse struct {
-	Brokers []RuntimeBrokerWithProvider `json:"brokers"`
-	NextCursor string                    `json:"nextCursor,omitempty"`
-	TotalCount int                       `json:"totalCount"`
+	Brokers    []RuntimeBrokerWithProvider `json:"brokers"`
+	NextCursor string                      `json:"nextCursor,omitempty"`
+	TotalCount int                         `json:"totalCount"`
+}
+
+// ListRuntimeBrokersWithCapsResponse is the standard broker list response with capabilities.
+type ListRuntimeBrokersWithCapsResponse struct {
+	Brokers    []RuntimeBrokerWithCapabilities `json:"brokers"`
+	NextCursor string                           `json:"nextCursor,omitempty"`
+	TotalCount int                              `json:"totalCount"`
 }
 
 func (s *Server) handleRuntimeBrokers(w http.ResponseWriter, r *http.Request) {
@@ -3134,6 +3184,20 @@ func (s *Server) listRuntimeBrokers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-resolve CreatedByName for all brokers
+	s.enrichBrokerCreatorNames(ctx, result.Items)
+
+	// Compute capabilities for the requesting user
+	ident := GetIdentityFromContext(ctx)
+	var caps []*Capabilities
+	if ident != nil {
+		resources := make([]Resource, len(result.Items))
+		for i := range result.Items {
+			resources[i] = brokerResource(&result.Items[i])
+		}
+		caps = s.authzService.ComputeCapabilitiesBatch(ctx, ident, resources, "broker")
+	}
+
 	// If filtering by groveId, include grove-specific provider data (like localPath)
 	if groveID != "" {
 		// Get provider data for this grove to include localPath
@@ -3151,11 +3215,15 @@ func (s *Server) listRuntimeBrokers(w http.ResponseWriter, r *http.Request) {
 
 		// Build extended broker list with provider data
 		extendedBrokers := make([]RuntimeBrokerWithProvider, 0, len(result.Items))
-		for _, broker := range result.Items {
-			extendedBrokers = append(extendedBrokers, RuntimeBrokerWithProvider{
+		for i, broker := range result.Items {
+			eb := RuntimeBrokerWithProvider{
 				RuntimeBroker: broker,
-				LocalPath:   brokerLocalPaths[broker.ID],
-			})
+				LocalPath:     brokerLocalPaths[broker.ID],
+			}
+			if caps != nil && i < len(caps) {
+				eb.Cap = caps[i]
+			}
+			extendedBrokers = append(extendedBrokers, eb)
 		}
 
 		writeJSON(w, http.StatusOK, ListRuntimeBrokersWithProviderResponse{
@@ -3166,8 +3234,16 @@ func (s *Server) listRuntimeBrokers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ListRuntimeBrokersResponse{
-		Brokers:    result.Items,
+	brokersWithCaps := make([]RuntimeBrokerWithCapabilities, len(result.Items))
+	for i, broker := range result.Items {
+		brokersWithCaps[i] = RuntimeBrokerWithCapabilities{RuntimeBroker: broker}
+		if caps != nil && i < len(caps) {
+			brokersWithCaps[i].Cap = caps[i]
+		}
+	}
+
+	writeJSON(w, http.StatusOK, ListRuntimeBrokersWithCapsResponse{
+		Brokers:    brokersWithCaps,
 		NextCursor: result.NextCursor,
 		TotalCount: result.TotalCount,
 	})
@@ -3279,13 +3355,31 @@ func (s *Server) handleRuntimeBrokerByID(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) getRuntimeBroker(w http.ResponseWriter, r *http.Request, id string) {
-	broker, err := s.store.GetRuntimeBroker(r.Context(), id)
+	ctx := r.Context()
+	broker, err := s.store.GetRuntimeBroker(ctx, id)
 	if err != nil {
 		writeErrorFromErr(w, err, "")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, broker)
+	// Enrich CreatedByName
+	if broker.CreatedBy != "" {
+		if user, err := s.store.GetUser(ctx, broker.CreatedBy); err == nil {
+			if user.DisplayName != "" {
+				broker.CreatedByName = user.DisplayName
+			} else {
+				broker.CreatedByName = user.Email
+			}
+		}
+	}
+
+	// Compute capabilities for the requesting user
+	resp := RuntimeBrokerWithCapabilities{RuntimeBroker: *broker}
+	if ident := GetIdentityFromContext(ctx); ident != nil {
+		resp.Cap = s.authzService.ComputeCapabilities(ctx, ident, brokerResource(broker))
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) updateRuntimeBroker(w http.ResponseWriter, r *http.Request, id string) {
@@ -3367,6 +3461,39 @@ func (s *Server) deleteRuntimeBroker(w http.ResponseWriter, r *http.Request, id 
 	LogDeregisterEvent(ctx, s.auditLogger, id, brokerName, actorID, clientIP)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// enrichBrokerCreatorNames batch-resolves CreatedBy UUIDs to display names for a slice of brokers.
+func (s *Server) enrichBrokerCreatorNames(ctx context.Context, brokers []store.RuntimeBroker) {
+	// Collect unique creator IDs
+	creatorIDs := make(map[string]struct{})
+	for _, b := range brokers {
+		if b.CreatedBy != "" {
+			creatorIDs[b.CreatedBy] = struct{}{}
+		}
+	}
+	if len(creatorIDs) == 0 {
+		return
+	}
+
+	// Resolve each unique creator ID to a display name
+	nameMap := make(map[string]string, len(creatorIDs))
+	for id := range creatorIDs {
+		if user, err := s.store.GetUser(ctx, id); err == nil {
+			if user.DisplayName != "" {
+				nameMap[id] = user.DisplayName
+			} else {
+				nameMap[id] = user.Email
+			}
+		}
+	}
+
+	// Apply resolved names
+	for i := range brokers {
+		if name, ok := nameMap[brokers[i].CreatedBy]; ok {
+			brokers[i].CreatedByName = name
+		}
+	}
 }
 
 // brokerHeartbeatRequest is the request body for broker heartbeats.

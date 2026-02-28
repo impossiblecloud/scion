@@ -289,8 +289,10 @@ export interface RuntimeBroker {
   autoProvide: boolean;
   endpoint?: string;
   createdBy?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
+  _capabilities?: Capabilities;
 }
 
 // ---------------------------------------------------------------------------

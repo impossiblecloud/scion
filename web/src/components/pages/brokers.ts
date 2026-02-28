@@ -454,7 +454,7 @@ export class ScionPageBrokers extends LitElement {
             ? html`
                 <div class="stat">
                   <span class="stat-label">Created By</span>
-                  <span class="stat-value">${broker.createdBy}</span>
+                  <span class="stat-value">${broker.createdByName || broker.createdBy}</span>
                 </div>
               `
             : ''}

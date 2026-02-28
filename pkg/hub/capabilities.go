@@ -33,6 +33,7 @@ var ResourceActions = map[string][]Action{
 	"group":    {ActionRead, ActionUpdate, ActionDelete, ActionAddMember, ActionRemoveMember},
 	"user":     {ActionRead, ActionUpdate},
 	"policy":   {ActionRead, ActionUpdate, ActionDelete},
+	"broker":   {ActionRead, ActionUpdate, ActionDelete, ActionDispatch},
 }
 
 // ScopeActions maps resource types to scope-level actions (e.g., create, list).
@@ -42,6 +43,7 @@ var ScopeActions = map[string][]Action{
 	"template": {ActionCreate, ActionList},
 	"group":    {ActionCreate, ActionList},
 	"policy":   {ActionCreate, ActionList},
+	"broker":   {ActionCreate, ActionList},
 }
 
 // agentResource constructs a Resource from a store.Agent for capability computation.
@@ -99,6 +101,15 @@ func policyResource(p *store.Policy) Resource {
 		Type:   "policy",
 		ID:     p.ID,
 		Labels: p.Labels,
+	}
+}
+
+// brokerResource constructs a Resource from a store.RuntimeBroker for capability computation.
+func brokerResource(b *store.RuntimeBroker) Resource {
+	return Resource{
+		Type:    "broker",
+		ID:      b.ID,
+		OwnerID: b.CreatedBy,
 	}
 }
 

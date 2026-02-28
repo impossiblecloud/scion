@@ -192,7 +192,8 @@ type RuntimeBroker struct {
 	Updated time.Time `json:"updated"`
 
 	// Ownership - tracks who registered this broker
-	CreatedBy string `json:"createdBy,omitempty"`
+	CreatedBy     string `json:"createdBy,omitempty"`
+	CreatedByName string `json:"createdByName,omitempty"` // Enriched: resolved from CreatedBy
 }
 
 // BrokerCapabilities describes what a runtime broker can do.

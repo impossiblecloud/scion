@@ -40,6 +40,7 @@ const (
 	ActionRegister     Action = "register"
 	ActionAddMember    Action = "addMember"
 	ActionRemoveMember Action = "removeMember"
+	ActionDispatch     Action = "dispatch"
 )
 
 // Resource represents the target of an authorization check.

@@ -53,3 +53,9 @@ type PolicyWithCapabilities struct {
 	store.Policy
 	Cap *Capabilities `json:"_capabilities,omitempty"`
 }
+
+// RuntimeBrokerWithCapabilities wraps a store.RuntimeBroker with capability annotations.
+type RuntimeBrokerWithCapabilities struct {
+	store.RuntimeBroker
+	Cap *Capabilities `json:"_capabilities,omitempty"`
+}

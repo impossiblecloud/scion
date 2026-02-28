@@ -1482,6 +1482,192 @@ func TestRuntimeBrokerGetByID(t *testing.T) {
 	}
 }
 
+func TestRuntimeBrokerGetByID_CreatedByName(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a user to be the broker creator
+	if err := s.CreateUser(ctx, &store.User{
+		ID:          "user_broker_creator",
+		Email:       "creator@test.com",
+		DisplayName: "Broker Creator",
+		Role:        "member",
+		Status:      "active",
+	}); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID:            "broker_createdby_test",
+		Name:          "CreatedBy Test Broker",
+		Slug:          "createdby-test-broker",
+		Status:        store.BrokerStatusOnline,
+		CreatedBy:     "user_broker_creator",
+		LastHeartbeat: time.Now(),
+		Created:       time.Now(),
+		Updated:       time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers/broker_createdby_test", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp RuntimeBrokerWithCapabilities
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.CreatedByName != "Broker Creator" {
+		t.Errorf("expected createdByName 'Broker Creator', got %q", resp.CreatedByName)
+	}
+
+	// Dev user is admin, so should have all capabilities
+	if resp.Cap == nil {
+		t.Fatal("expected capabilities to be set")
+	}
+	found := false
+	for _, action := range resp.Cap.Actions {
+		if action == "dispatch" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'dispatch' in capabilities, got %v", resp.Cap.Actions)
+	}
+}
+
+func TestRuntimeBrokerGetByID_CreatedByNameFallsBackToEmail(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a user with no display name
+	if err := s.CreateUser(ctx, &store.User{
+		ID:     "user_no_display",
+		Email:  "nodisplay@test.com",
+		Role:   "member",
+		Status: "active",
+	}); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID:            "broker_email_fallback",
+		Name:          "Email Fallback Broker",
+		Slug:          "email-fallback-broker",
+		Status:        store.BrokerStatusOnline,
+		CreatedBy:     "user_no_display",
+		LastHeartbeat: time.Now(),
+		Created:       time.Now(),
+		Updated:       time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers/broker_email_fallback", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp RuntimeBrokerWithCapabilities
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.CreatedByName != "nodisplay@test.com" {
+		t.Errorf("expected createdByName 'nodisplay@test.com', got %q", resp.CreatedByName)
+	}
+}
+
+func TestRuntimeBrokerList_Capabilities(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID:            "broker_caps_list",
+		Name:          "Caps List Broker",
+		Slug:          "caps-list-broker",
+		Status:        store.BrokerStatusOnline,
+		LastHeartbeat: time.Now(),
+		Created:       time.Now(),
+		Updated:       time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListRuntimeBrokersWithCapsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Brokers) != 1 {
+		t.Fatalf("expected 1 broker, got %d", len(resp.Brokers))
+	}
+
+	if resp.Brokers[0].Cap == nil {
+		t.Fatal("expected capabilities to be set on listed broker")
+	}
+}
+
+func TestRuntimeBrokerList_CreatedByName(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a user to be the broker creator
+	if err := s.CreateUser(ctx, &store.User{
+		ID:          "user_list_creator",
+		Email:       "listcreator@test.com",
+		DisplayName: "List Creator",
+		Role:        "member",
+		Status:      "active",
+	}); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID:            "broker_list_createdby",
+		Name:          "List CreatedBy Broker",
+		Slug:          "list-createdby-broker",
+		Status:        store.BrokerStatusOnline,
+		CreatedBy:     "user_list_creator",
+		LastHeartbeat: time.Now(),
+		Created:       time.Now(),
+		Updated:       time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListRuntimeBrokersWithCapsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Brokers) != 1 {
+		t.Fatalf("expected 1 broker, got %d", len(resp.Brokers))
+	}
+
+	if resp.Brokers[0].CreatedByName != "List Creator" {
+		t.Errorf("expected createdByName 'List Creator', got %q", resp.Brokers[0].CreatedByName)
+	}
+}
+
 func TestRuntimeBrokerListWithGroveLocalPath(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()

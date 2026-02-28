@@ -484,3 +484,93 @@ func TestScopeLevel(t *testing.T) {
 	assert.Equal(t, 2, scopeLevel("resource"))
 	assert.Equal(t, -1, scopeLevel("unknown"))
 }
+
+func TestAuthz_BrokerDispatch_OwnerAllowed(t *testing.T) {
+	authz, s := authzTestSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "broker-owner", Email: "owner@test.com", DisplayName: "Owner", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("broker-owner", "owner@test.com", "Owner", "member", "api")
+	resource := Resource{Type: "broker", ID: "broker-1", OwnerID: "broker-owner"}
+
+	decision := authz.CheckAccess(ctx, user, resource, ActionDispatch)
+	assert.True(t, decision.Allowed)
+	assert.Equal(t, "resource owner", decision.Reason)
+}
+
+func TestAuthz_BrokerDispatch_NonOwnerDenied(t *testing.T) {
+	authz, s := authzTestSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "other-user", Email: "other@test.com", DisplayName: "Other", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("other-user", "other@test.com", "Other", "member", "api")
+	resource := Resource{Type: "broker", ID: "broker-1", OwnerID: "broker-owner-id"}
+
+	decision := authz.CheckAccess(ctx, user, resource, ActionDispatch)
+	assert.False(t, decision.Allowed)
+	assert.Equal(t, "default deny", decision.Reason)
+}
+
+func TestAuthz_BrokerDispatch_AdminAllowed(t *testing.T) {
+	authz, _ := authzTestSetup(t)
+	ctx := context.Background()
+
+	admin := NewAuthenticatedUser("admin-1", "admin@example.com", "Admin", "admin", "api")
+	resource := Resource{Type: "broker", ID: "broker-1", OwnerID: "someone-else"}
+
+	decision := authz.CheckAccess(ctx, admin, resource, ActionDispatch)
+	assert.True(t, decision.Allowed)
+	assert.Equal(t, "admin bypass", decision.Reason)
+}
+
+func TestAuthz_BrokerCapabilities_Owner(t *testing.T) {
+	authz, s := authzTestSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "cap-owner", Email: "cap-owner@test.com", DisplayName: "Cap Owner", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("cap-owner", "cap-owner@test.com", "Cap Owner", "member", "api")
+	resource := Resource{Type: "broker", ID: "broker-cap", OwnerID: "cap-owner"}
+
+	caps := authz.ComputeCapabilities(ctx, user, resource)
+	assert.Contains(t, caps.Actions, "dispatch")
+	assert.Contains(t, caps.Actions, "read")
+	assert.Contains(t, caps.Actions, "update")
+	assert.Contains(t, caps.Actions, "delete")
+}
+
+func TestAuthz_BrokerCapabilities_NonOwner(t *testing.T) {
+	authz, s := authzTestSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.CreateUser(ctx, &store.User{
+		ID: "cap-nonowner", Email: "nonowner@test.com", DisplayName: "Non Owner", Role: "member", Status: "active",
+	}))
+
+	user := NewAuthenticatedUser("cap-nonowner", "nonowner@test.com", "Non Owner", "member", "api")
+	resource := Resource{Type: "broker", ID: "broker-cap", OwnerID: "someone-else"}
+
+	caps := authz.ComputeCapabilities(ctx, user, resource)
+	assert.NotContains(t, caps.Actions, "dispatch")
+	assert.NotContains(t, caps.Actions, "delete")
+}
+
+func TestBrokerResource_Helper(t *testing.T) {
+	broker := &store.RuntimeBroker{
+		ID:        "broker-helper-test",
+		CreatedBy: "user-123",
+	}
+
+	r := brokerResource(broker)
+	assert.Equal(t, "broker", r.Type)
+	assert.Equal(t, "broker-helper-test", r.ID)
+	assert.Equal(t, "user-123", r.OwnerID)
+}

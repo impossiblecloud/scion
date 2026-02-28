@@ -663,7 +663,7 @@ export class ScionPageAgentDetail extends LitElement {
         </div>
       </div>
 
-      ${(this.agent.phase === 'error' || (!this.agent.phase && this.agent.status === 'error')) && (this.agent.detail?.message || this.agent.message)
+      ${this.agent.phase === 'error' && (this.agent.detail?.message || this.agent.message)
         ? html`
             <div class="agent-error-banner">
               <sl-icon name="exclamation-octagon"></sl-icon>

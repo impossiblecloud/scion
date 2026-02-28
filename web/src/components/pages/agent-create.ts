@@ -345,14 +345,10 @@ export class ScionPageAgentCreate extends LitElement {
       }
 
       // If the backend didn't already start the agent, explicitly start it.
-      // Prefer phase-based check; fall back to legacy status.
       const startedPhases = ['running', 'provisioning', 'cloning', 'starting'];
-      const startedStatuses = ['running', 'provisioning', 'busy', 'idle', 'cloning'];
       const alreadyStarted = agent?.phase
         ? startedPhases.includes(agent.phase)
-        : agent?.status
-          ? startedStatuses.includes(agent.status)
-          : false;
+        : false;
       if (!alreadyStarted) {
         const startResp = await fetch(`/api/v1/agents/${agentId}/start`, {
           method: 'POST',

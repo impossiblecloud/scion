@@ -133,20 +133,6 @@ export interface Grove {
 }
 
 /**
- * Agent status enumeration (legacy flat status)
- */
-export type AgentStatus =
-  | 'running'
-  | 'stopped'
-  | 'provisioning'
-  | 'cloning'
-  | 'error'
-  | 'idle'
-  | 'busy'
-  | 'waiting_for_input'
-  | 'completed';
-
-/**
  * Agent lifecycle phase (from canonical agent state model)
  */
 export type AgentPhase =
@@ -181,45 +167,31 @@ export interface AgentDetail {
   taskSummary?: string;
 }
 
-/** Statuses where the agent container has not yet started or has terminated. */
-const TERMINAL_UNAVAILABLE_STATUSES: ReadonlySet<AgentStatus> = new Set([
-  'provisioning',
-  'cloning',
-  'stopped',
-  'completed',
-]);
-
 /**
  * Whether an agent's terminal is accessible.
- * Uses phase when available; falls back to legacy status.
+ * Terminal is available when the agent is in running or stopping phase.
  */
 export function isTerminalAvailable(agent: Agent): boolean {
-  const phase = agent.phase;
-  if (phase) {
-    return phase === 'running' || phase === 'stopping';
-  }
-  return !TERMINAL_UNAVAILABLE_STATUSES.has(agent.status);
+  return agent.phase === 'running' || agent.phase === 'stopping';
 }
 
 /**
  * Returns the display status string for an agent.
  * When the agent is running, shows the activity (e.g. 'thinking');
- * otherwise shows the lifecycle phase. Falls back to legacy status.
+ * otherwise shows the lifecycle phase.
  */
 export function getAgentDisplayStatus(agent: Agent): string {
   if (agent.phase === 'running' && agent.activity) {
     return agent.activity;
   }
-  return agent.phase || agent.status;
+  return agent.phase;
 }
 
 /**
  * Whether the agent is in a running lifecycle phase.
- * Falls back to legacy status when phase is not present.
  */
 export function isAgentRunning(agent: Agent): boolean {
-  if (agent.phase) return agent.phase === 'running';
-  return !['provisioning', 'cloning', 'stopped', 'error', 'created'].includes(agent.status);
+  return agent.phase === 'running';
 }
 
 /**
@@ -231,8 +203,7 @@ export interface Agent {
   groveId: string;
   grove?: string;
   template: string;
-  status: AgentStatus;
-  phase?: AgentPhase;
+  phase: AgentPhase;
   activity?: AgentActivity;
   detail?: AgentDetail;
   taskSummary?: string;

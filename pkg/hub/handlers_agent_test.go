@@ -2392,3 +2392,68 @@ func TestCreateAgent_NotifySubscriptionCascadeOnDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, subs, 0, "subscriptions should be cascade-deleted with agent")
 }
+
+func TestBrokerHeartbeat_PublishesActivitySSE(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Wire up a real event publisher so we can subscribe to SSE events
+	pub := NewChannelEventPublisher()
+	defer pub.Close()
+	srv.SetEventPublisher(pub)
+
+	// Create grove, broker, and agent
+	grove := &store.Grove{ID: "grove-hb-sse", Name: "HB SSE Grove", Slug: "hb-sse-grove"}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-hb-sse", Name: "HB SSE Broker", Slug: "hb-sse-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	agent := &store.Agent{
+		ID: "agent-hb-sse", Slug: "agent-hb-slug", Name: "HB SSE Agent",
+		GroveID: grove.ID, RuntimeBrokerID: broker.ID,
+		Phase: string(state.PhaseRunning),
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	// Subscribe to agent-specific status events
+	ch, unsub := pub.Subscribe("agent." + agent.ID + ".status")
+	defer unsub()
+
+	// Send broker heartbeat with an activity change
+	heartbeat := brokerHeartbeatRequest{
+		Status: "online",
+		Groves: []brokerGroveHeartbeat{{
+			GroveID:    grove.ID,
+			AgentCount: 1,
+			Agents: []brokerAgentHeartbeat{{
+				Slug:     agent.Slug,
+				Phase:    string(state.PhaseRunning),
+				Activity: "thinking",
+			}},
+		}},
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/runtime-brokers/"+broker.ID+"/heartbeat", heartbeat)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify store was updated
+	updated, err := s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "thinking", updated.Activity)
+
+	// Verify SSE event was published
+	select {
+	case evt := <-ch:
+		assert.Equal(t, "agent."+agent.ID+".status", evt.Subject)
+		var statusEvt AgentStatusEvent
+		require.NoError(t, json.Unmarshal(evt.Data, &statusEvt))
+		assert.Equal(t, "thinking", statusEvt.Activity)
+		assert.Equal(t, string(state.PhaseRunning), statusEvt.Phase)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for SSE event from broker heartbeat")
+	}
+}

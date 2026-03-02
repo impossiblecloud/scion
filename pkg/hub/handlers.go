@@ -3653,6 +3653,11 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 					"agentSlug", agentHB.Slug,
 					"groveID", grove.GroveID,
 					"error", err)
+			} else {
+				// Publish SSE event so the frontend receives activity updates
+				if updated, err := s.store.GetAgent(ctx, agent.ID); err == nil {
+					s.events.PublishAgentStatus(ctx, updated)
+				}
 			}
 		}
 	}

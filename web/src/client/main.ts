@@ -79,6 +79,7 @@ import '../components/pages/admin-groups.js';
 import '../components/pages/admin-group-detail.js';
 import '../components/pages/profile-env-vars.js';
 import '../components/pages/profile-secrets.js';
+import '../components/pages/settings.js';
 import '../components/pages/not-found.js';
 import '../components/pages/login.js';
 
@@ -123,6 +124,7 @@ const ROUTES: { pattern: RegExp; tag: string }[] = [
   { pattern: /^\/admin\/users$/, tag: 'scion-page-admin-users' },
   { pattern: /^\/admin\/groups$/, tag: 'scion-page-admin-groups' },
   { pattern: /^\/admin\/groups\/[^/]+$/, tag: 'scion-page-admin-group-detail' },
+  { pattern: /^\/settings$/, tag: 'scion-page-settings' },
   { pattern: /^\/profile\/env$/, tag: 'scion-page-profile-env-vars' },
   { pattern: /^\/profile\/secrets$/, tag: 'scion-page-profile-secrets' },
   { pattern: /^\/profile$/, tag: 'scion-page-profile-env-vars' },
@@ -199,6 +201,7 @@ async function init(): Promise<void> {
     customElements.whenDefined('scion-page-admin-users'),
     customElements.whenDefined('scion-page-admin-groups'),
     customElements.whenDefined('scion-page-admin-group-detail'),
+    customElements.whenDefined('scion-page-settings'),
     customElements.whenDefined('scion-page-profile-env-vars'),
     customElements.whenDefined('scion-page-profile-secrets'),
     customElements.whenDefined('scion-profile-shell'),

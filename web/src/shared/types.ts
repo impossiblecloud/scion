@@ -237,7 +237,7 @@ export interface Template {
 /**
  * Scope for environment variables and secrets
  */
-export type ResourceScope = 'user' | 'grove' | 'runtime_broker';
+export type ResourceScope = 'user' | 'grove' | 'runtime_broker' | 'hub';
 
 /**
  * Injection mode for environment variables

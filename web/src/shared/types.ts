@@ -126,6 +126,7 @@ export interface Grove {
   status: GroveStatus;
   visibility?: string;
   labels?: Record<string, string>;
+  defaultRuntimeBrokerId?: string;
   agentCount: number;
   createdAt: string;
   updatedAt: string;

@@ -281,15 +281,8 @@ export class ScionPageAgentCreate extends LitElement {
         this.groveId = this.groves[0].id;
       }
 
-      // Auto-select first online broker
-      if (!this.brokerId) {
-        const onlineBroker = this.brokers.find((b) => b.status === 'online');
-        if (onlineBroker) {
-          this.brokerId = onlineBroker.id;
-        } else if (this.brokers.length > 0) {
-          this.brokerId = this.brokers[0].id;
-        }
-      }
+      // Auto-select broker based on grove's default
+      this.selectBrokerForGrove();
 
       // Auto-select default template if available
       if (!this.templateId) {
@@ -401,6 +394,30 @@ export class ScionPageAgentCreate extends LitElement {
     }
   }
 
+  /**
+   * Select the best broker for the currently selected grove.
+   * Prefers the grove's default broker; falls back to first online broker.
+   */
+  private selectBrokerForGrove(): void {
+    const grove = this.groves.find((g) => g.id === this.groveId);
+    if (grove?.defaultRuntimeBrokerId) {
+      const defaultBroker = this.brokers.find(
+        (b) => b.id === grove.defaultRuntimeBrokerId
+      );
+      if (defaultBroker) {
+        this.brokerId = defaultBroker.id;
+        return;
+      }
+    }
+    // Fallback: first online broker, then first broker
+    const onlineBroker = this.brokers.find((b) => b.status === 'online');
+    if (onlineBroker) {
+      this.brokerId = onlineBroker.id;
+    } else if (this.brokers.length > 0) {
+      this.brokerId = this.brokers[0].id;
+    }
+  }
+
   private onTemplateChange(e: Event): void {
     const select = e.target as HTMLElement & { value: string };
     this.templateId = select.value;
@@ -468,6 +485,7 @@ export class ScionPageAgentCreate extends LitElement {
               .value=${this.groveId}
               @sl-change=${(e: Event) => {
                 this.groveId = (e.target as HTMLElement & { value: string }).value;
+                this.selectBrokerForGrove();
               }}
               required
             >

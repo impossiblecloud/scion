@@ -46,6 +46,7 @@ export interface AppState {
   groves: Map<string, Grove>;
   brokers: Map<string, RuntimeBroker>;
   deletedGroveIds: Set<string>;
+  deletedAgentIds: Set<string>;
   connected: boolean;
   scope: ViewScope | null;
   /** Scope-level capabilities from the SSR-prefetched list response */
@@ -67,6 +68,7 @@ export class StateManager extends EventTarget {
     groves: new Map(),
     brokers: new Map(),
     deletedGroveIds: new Set(),
+    deletedAgentIds: new Set(),
     connected: false,
     scope: null,
     scopeCapabilities: undefined,
@@ -140,6 +142,7 @@ export class StateManager extends EventTarget {
     this.state.groves.clear();
     this.state.brokers.clear();
     this.state.deletedGroveIds.clear();
+    this.state.deletedAgentIds.clear();
     this.state.scopeCapabilities = undefined;
 
     const subjects = this.subjectsForScope(scope);
@@ -245,6 +248,7 @@ export class StateManager extends EventTarget {
   private handleAgentEvent(agentId: string, eventType: string, data: unknown): void {
     if (eventType === 'deleted') {
       this.state.agents.delete(agentId);
+      this.state.deletedAgentIds.add(agentId);
     } else {
       // Merge delta into existing agent state
       const existing = this.state.agents.get(agentId) || ({} as Agent);
@@ -366,6 +370,7 @@ export class StateManager extends EventTarget {
     groveIds: string[];
     brokerIds: string[];
     deletedGroveIds: string[];
+    deletedAgentIds: string[];
   } {
     return {
       agentCount: this.state.agents.size,
@@ -375,6 +380,7 @@ export class StateManager extends EventTarget {
       groveIds: Array.from(this.state.groves.keys()),
       brokerIds: Array.from(this.state.brokers.keys()),
       deletedGroveIds: Array.from(this.state.deletedGroveIds),
+      deletedAgentIds: Array.from(this.state.deletedAgentIds),
     };
   }
 
@@ -414,6 +420,10 @@ export class StateManager extends EventTarget {
 
   getDeletedGroveIds(): Set<string> {
     return this.state.deletedGroveIds;
+  }
+
+  getDeletedAgentIds(): Set<string> {
+    return this.state.deletedAgentIds;
   }
 
   getScopeCapabilities(): import('../shared/types.js').Capabilities | undefined {

@@ -255,8 +255,12 @@ export class ScionPageAgents extends LitElement {
       void this.loadAgents();
     }
 
-    // Set SSE scope to dashboard (all grove summaries)
+    // Set SSE scope to dashboard (all grove summaries).
+    // setScope clears state maps, so re-seed with any loaded agents afterward.
     stateManager.setScope({ type: 'dashboard' });
+    if (this.agents.length > 0) {
+      stateManager.seedAgents(this.agents);
+    }
 
     // Listen for real-time agent updates
     stateManager.addEventListener('agents-updated', this.boundOnAgentsUpdated as EventListener);
@@ -280,12 +284,10 @@ export class ScionPageAgents extends LitElement {
       }
       agentMap.set(agent.id, merged);
     }
-    // Remove agents that were deleted (present locally but not in state)
-    const stateAgentIds = new Set(updatedAgents.map((a) => a.id));
-    for (const id of agentMap.keys()) {
-      if (!stateAgentIds.has(id) && stateManager.getAgent(id) === undefined) {
-        agentMap.delete(id);
-      }
+    // Remove agents that were explicitly deleted via SSE
+    const deletedIds = stateManager.getDeletedAgentIds();
+    for (const id of deletedIds) {
+      agentMap.delete(id);
     }
     this.agents = Array.from(agentMap.values());
   }
@@ -310,6 +312,8 @@ export class ScionPageAgents extends LitElement {
         this.agents = data.agents || [];
         this.scopeCapabilities = data._capabilities;
       }
+      // Seed stateManager so SSE delta merging has full baseline data
+      stateManager.seedAgents(this.agents);
     } catch (err) {
       console.error('Failed to load agents:', err);
       this.error = err instanceof Error ? err.message : 'Failed to load agents';

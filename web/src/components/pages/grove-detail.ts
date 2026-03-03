@@ -526,12 +526,10 @@ export class ScionPageGroveDetail extends LitElement {
         agentMap.set(agent.id, { ...agentMap.get(agent.id), ...agent } as Agent);
       }
     }
-    // Remove agents that were deleted (present locally but not in state)
-    const stateAgentIds = new Set(updatedAgents.map((a) => a.id));
-    for (const id of agentMap.keys()) {
-      if (!stateAgentIds.has(id) && stateManager.getAgent(id) === undefined) {
-        agentMap.delete(id);
-      }
+    // Remove agents that were explicitly deleted via SSE
+    const deletedIds = stateManager.getDeletedAgentIds();
+    for (const id of deletedIds) {
+      agentMap.delete(id);
     }
     this.agents = Array.from(agentMap.values());
   }

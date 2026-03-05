@@ -204,32 +204,37 @@ func ValidateAuth(resolved *api.ResolvedAuth) error {
 // Returns nil for unknown/unset combinations or harnesses with no
 // intrinsic auth requirements (e.g., generic).
 func RequiredAuthEnvKeys(harnessName, authSelectedType string) [][]string {
-	if authSelectedType == "" {
-		return nil
+	// When authType is empty (unset), default to api-key — it's the
+	// first-choice method in every harness's ResolveAuth(). This ensures
+	// env-gather detects missing keys and returns 202 so the CLI can
+	// collect them from the user's environment.
+	effectiveType := authSelectedType
+	if effectiveType == "" {
+		effectiveType = "api-key"
 	}
 
 	switch harnessName {
 	case "claude":
-		switch authSelectedType {
+		switch effectiveType {
 		case "api-key":
 			return [][]string{{"ANTHROPIC_API_KEY"}}
 		case "vertex-ai":
 			return [][]string{{"GOOGLE_CLOUD_PROJECT"}, {"GOOGLE_CLOUD_REGION"}}
 		}
 	case "gemini":
-		switch authSelectedType {
+		switch effectiveType {
 		case "api-key":
 			return [][]string{{"GEMINI_API_KEY", "GOOGLE_API_KEY"}}
 		case "vertex-ai":
 			return [][]string{{"GOOGLE_CLOUD_PROJECT"}}
 		}
 	case "opencode":
-		switch authSelectedType {
+		switch effectiveType {
 		case "api-key":
 			return [][]string{{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}}
 		}
 	case "codex":
-		switch authSelectedType {
+		switch effectiveType {
 		case "api-key":
 			return [][]string{{"CODEX_API_KEY", "OPENAI_API_KEY"}}
 		}

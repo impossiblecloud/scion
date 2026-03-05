@@ -548,16 +548,14 @@ profiles:
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
-	// Satisfy ANTHROPIC_API_KEY (from harness) via broker env
-	t.Setenv("ANTHROPIC_API_KEY", "broker-ant-key")
-
 	body := `{
 		"name": "test-agent-secret-upgrade",
 		"id": "agent-uuid-secret",
 		"gatherEnv": true,
 		"grovePath": "` + groveDir + `",
 		"resolvedSecrets": [
-			{"name": "API_KEY", "type": "environment", "target": "API_KEY", "value": "secret-api-key", "source": "user"}
+			{"name": "API_KEY", "type": "environment", "target": "API_KEY", "value": "secret-api-key", "source": "user"},
+			{"name": "ANTHROPIC_API_KEY", "type": "environment", "target": "ANTHROPIC_API_KEY", "value": "secret-ant-key", "source": "user"}
 		],
 		"config": {"template": "claude", "profile": "default"}
 	}`

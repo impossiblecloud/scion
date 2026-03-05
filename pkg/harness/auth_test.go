@@ -389,9 +389,14 @@ func TestRequiredAuthEnvKeys(t *testing.T) {
 		{"generic api-key", "generic", "api-key", nil},
 		{"generic vertex-ai", "generic", "vertex-ai", nil},
 
+		// Empty authType defaults to api-key
+		{"claude empty auth type", "claude", "", [][]string{{"ANTHROPIC_API_KEY"}}},
+		{"gemini empty auth type", "gemini", "", [][]string{{"GEMINI_API_KEY", "GOOGLE_API_KEY"}}},
+		{"opencode empty auth type", "opencode", "", [][]string{{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}}},
+		{"codex empty auth type", "codex", "", [][]string{{"CODEX_API_KEY", "OPENAI_API_KEY"}}},
+
 		// Unknown/empty
 		{"empty harness", "", "api-key", nil},
-		{"empty auth type", "claude", "", nil},
 		{"both empty", "", "", nil},
 		{"unknown harness", "unknown", "api-key", nil},
 		{"unknown auth type", "claude", "unknown", nil},

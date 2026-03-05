@@ -17,7 +17,7 @@ Developer convenience scripts for local development, testing, and infrastructure
 | `create-cluster.sh` | Create a Kubernetes cluster |
 | `merge-work.sh` | Merge agent work branches |
 | `trigger-cloudbuild.sh` | Trigger a Google Cloud Build |
-| `pull-apple-containers.sh` | Pull Apple container images |
+| `pull-containers.sh` | Pull container images (auto-detects runtime; supports container, docker, podman) |
 | `version.sh` | Display version information |
 
 These scripts are for development and operations -- not end-user tooling.

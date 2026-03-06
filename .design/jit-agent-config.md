@@ -289,7 +289,7 @@ The detailed design for the web form is deferred to a separate design round once
 
 ## 4. Implementation Approach
 
-### Phase 1: Expand ScionConfig and Add CLI `--config` Flag
+### Phase 1: Expand ScionConfig and Add CLI `--config` Flag ✅ COMPLETE
 
 **Scope:** Add the new fields to `ScionConfig`, implement content resolution for inline values, and add `--config <path>` to `scion start` and `scion create`.
 

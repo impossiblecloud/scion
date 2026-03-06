@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -937,6 +938,17 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Auto-compute ContainerHubEndpoint for combo mode when the hub
+		// endpoint is localhost and the runtime is a container engine that
+		// needs a bridge address to reach the host network.
+		containerHubEndpoint := cfg.RuntimeBroker.ContainerHubEndpoint
+		if containerHubEndpoint == "" && enableHub && hubEndpointForRH != "" && rt != nil {
+			if computed := containerBridgeEndpoint(hubEndpointForRH, rt.Name()); computed != "" {
+				containerHubEndpoint = computed
+				log.Printf("Auto-computed ContainerHubEndpoint for %s runtime: %s", rt.Name(), containerHubEndpoint)
+			}
+		}
+
 		// Create Runtime Broker server configuration
 		rhCfg := runtimebroker.ServerConfig{
 			Port:                 cfg.RuntimeBroker.Port,
@@ -944,7 +956,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			ReadTimeout:          cfg.RuntimeBroker.ReadTimeout,
 			WriteTimeout:         cfg.RuntimeBroker.WriteTimeout,
 			HubEndpoint:          hubEndpointForRH,
-			ContainerHubEndpoint: cfg.RuntimeBroker.ContainerHubEndpoint,
+			ContainerHubEndpoint: containerHubEndpoint,
 			BrokerID:           brokerID,
 			BrokerName:         brokerName,
 			CORSEnabled:        cfg.RuntimeBroker.CORSEnabled,
@@ -1458,4 +1470,30 @@ func init() {
 
 	// Admin bootstrap flags
 	serverStartCmd.Flags().StringVar(&adminEmails, "admin-emails", "", "Comma-separated list of email addresses to auto-promote to admin role")
+}
+
+// containerBridgeEndpoint returns a container-accessible URL that replaces
+// localhost in hubEndpoint with the appropriate bridge hostname for the given
+// runtime. Returns "" if the endpoint is not localhost or the runtime does not
+// need a bridge address (e.g. kubernetes).
+func containerBridgeEndpoint(hubEndpoint, runtimeName string) string {
+	var bridgeHost string
+	switch runtimeName {
+	case "podman":
+		bridgeHost = "host.containers.internal"
+	case "docker":
+		bridgeHost = "host.docker.internal"
+	default:
+		return ""
+	}
+	u, err := url.Parse(hubEndpoint)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		return ""
+	}
+	u.Host = net.JoinHostPort(bridgeHost, u.Port())
+	return u.String()
 }

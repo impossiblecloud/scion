@@ -224,6 +224,169 @@ func TestBuildAgentEnv_MissingKeysReturned(t *testing.T) {
 	}
 }
 
+func TestStartBrokerMode_EmptyEnvNotFatal(t *testing.T) {
+	// In broker mode, empty env vars from scion-agent.json that the hub
+	// didn't resolve (e.g., profile-level keys irrelevant to the selected
+	// harness) should produce warnings but NOT block agent start.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "test-harness")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: gemini\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "test-harness"}`), 0644)
+
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: local
+profiles:
+  local:
+    runtime: docker
+`), 0644)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	var capturedEnv []string
+	mockRT := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		RunFunc: func(ctx context.Context, config runtime.RunConfig) (string, error) {
+			capturedEnv = config.Env
+			return "mock-id", nil
+		},
+	}
+
+	// Write scion-agent.json with empty env vars (simulating profile-level
+	// passthrough markers that are irrelevant to the selected harness)
+	agentDir := filepath.Join(projectScionDir, "agents", "broker-test")
+	os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+	os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+		"harness": "generic",
+		"env": {
+			"GEMINI_API_KEY": "",
+			"OPENAI_API_KEY": "",
+			"GOOD_KEY": "good-value"
+		}
+	}`), 0644)
+
+	mgr := NewManager(mockRT)
+
+	// In broker mode, empty env vars should NOT cause an error
+	_, err := mgr.Start(context.Background(), api.StartOptions{
+		Name:       "broker-test",
+		GrovePath:  projectScionDir,
+		BrokerMode: true,
+		NoAuth:     true,
+		Env: map[string]string{
+			"GEMINI_API_KEY": "resolved-from-hub",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start in BrokerMode should not fail on empty env vars, got: %v", err)
+	}
+
+	// Verify GEMINI_API_KEY was resolved from hub env
+	envMap := make(map[string]string)
+	for _, e := range capturedEnv {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if envMap["GEMINI_API_KEY"] != "resolved-from-hub" {
+		t.Errorf("GEMINI_API_KEY = %q, want %q", envMap["GEMINI_API_KEY"], "resolved-from-hub")
+	}
+	if envMap["GOOD_KEY"] != "good-value" {
+		t.Errorf("GOOD_KEY = %q, want %q", envMap["GOOD_KEY"], "good-value")
+	}
+	// OPENAI_API_KEY should be omitted (empty and not resolved)
+	if _, ok := envMap["OPENAI_API_KEY"]; ok {
+		t.Error("expected OPENAI_API_KEY to be omitted, but it was present")
+	}
+}
+
+func TestStartLocalMode_EmptyEnvIsFatal(t *testing.T) {
+	// In local (non-broker) mode, empty env vars that can't be resolved
+	// should still cause a fatal error.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "test-harness")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: gemini\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "test-harness"}`), 0644)
+
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: local
+profiles:
+  local:
+    runtime: docker
+`), 0644)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	mockRT := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		RunFunc: func(ctx context.Context, config runtime.RunConfig) (string, error) {
+			return "mock-id", nil
+		},
+	}
+
+	agentDir := filepath.Join(projectScionDir, "agents", "local-test")
+	os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+	os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+		"harness": "generic",
+		"env": {
+			"MISSING_KEY": ""
+		}
+	}`), 0644)
+
+	mgr := NewManager(mockRT)
+
+	// In local mode (BrokerMode=false), empty env vars should be fatal
+	_, err := mgr.Start(context.Background(), api.StartOptions{
+		Name:      "local-test",
+		GrovePath: projectScionDir,
+		NoAuth:    true,
+	})
+	if err == nil {
+		t.Fatal("expected Start to fail on empty env vars in local mode")
+	}
+	if !strings.Contains(err.Error(), "MISSING_KEY") {
+		t.Errorf("expected error to mention MISSING_KEY, got: %v", err)
+	}
+}
+
 func TestBuildAgentEnv_EmptyValuePassthrough(t *testing.T) {
 	// When a config env entry has an empty value (no ${VAR} reference),
 	// buildAgentEnv should implicitly look up the host env var of the same name.

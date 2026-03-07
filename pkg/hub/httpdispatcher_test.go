@@ -1407,6 +1407,78 @@ func TestHTTPAgentDispatcher_DispatchAgentStart_ConfigEnvTakesPrecedence(t *test
 	}
 }
 
+func TestHTTPAgentDispatcher_DispatchAgentStart_StorageOverridesEmptyConfigEnv(t *testing.T) {
+	// When AppliedConfig.Env has a key with an empty value (passthrough marker),
+	// storage env should override it so that hub-stored secrets are available.
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	grove := &store.Grove{
+		ID:   "grove-empty-env",
+		Name: "empty-env-test",
+		Slug: "empty-env-test",
+	}
+	if err := memStore.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID:       "broker-empty-env",
+		Name:     "test-broker",
+		Slug:     "test-broker",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Store an env var that should override the empty config value
+	if err := memStore.CreateEnvVar(ctx, &store.EnvVar{
+		ID:      "ev-empty-1",
+		Key:     "GEMINI_API_KEY",
+		Value:   "stored-api-key",
+		Scope:   "grove",
+		ScopeID: "grove-empty-env",
+	}); err != nil {
+		t.Fatalf("failed to set env var: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false, slog.Default())
+
+	agent := &store.Agent{
+		ID:              "agent-empty-env",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		GroveID:         "grove-empty-env",
+		RuntimeBrokerID: "broker-empty-env",
+		AppliedConfig: &store.AgentAppliedConfig{
+			HarnessConfig: "gemini",
+			// Empty value = passthrough marker; storage should fill it in
+			Env: map[string]string{
+				"GEMINI_API_KEY": "",
+				"EXPLICIT_VAR":   "explicit-value",
+			},
+		},
+	}
+
+	err := dispatcher.DispatchAgentStart(ctx, agent, "")
+	if err != nil {
+		t.Fatalf("DispatchAgentStart failed: %v", err)
+	}
+
+	// Storage env should override the empty config value
+	if v := mockClient.lastResolvedEnv["GEMINI_API_KEY"]; v != "stored-api-key" {
+		t.Errorf("expected storage to override empty config env, got GEMINI_API_KEY='%s' (wanted 'stored-api-key')", v)
+	}
+
+	// Non-empty config env should still take precedence
+	if v := mockClient.lastResolvedEnv["EXPLICIT_VAR"]; v != "explicit-value" {
+		t.Errorf("expected EXPLICIT_VAR='explicit-value', got '%s'", v)
+	}
+}
+
 func TestHTTPAgentDispatcher_DispatchAgentCreate_InjectsDevToken(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)

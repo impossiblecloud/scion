@@ -675,7 +675,9 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 	}
 
 	// Resolve env vars from Hub storage (user/grove/broker scopes) and merge.
-	// Storage env vars fill in keys not already set by explicit config env vars.
+	// Storage env vars fill in keys not already set (with a non-empty value)
+	// by explicit config env vars. Empty-value config entries are passthrough
+	// markers and should be overridden by storage values.
 	envFromStorage, err := d.resolveEnvFromStorage(ctx, agent)
 	if err != nil {
 		if d.debug {
@@ -686,7 +688,7 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 			req.ResolvedEnv = make(map[string]string)
 		}
 		for k, v := range envFromStorage {
-			if _, exists := req.ResolvedEnv[k]; !exists {
+			if existing, exists := req.ResolvedEnv[k]; !exists || existing == "" {
 				req.ResolvedEnv[k] = v
 			}
 		}
@@ -1127,7 +1129,10 @@ func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *sto
 	}
 
 	// Merge env vars from Hub storage; storage vars fill in keys not already
-	// set by explicit config env vars (same precedence as buildCreateRequest).
+	// set (with a non-empty value) by explicit config env vars.
+	// Empty-value config entries are passthrough markers — storage values
+	// should override them so that hub-stored secrets (API keys, etc.) are
+	// available to the agent.
 	envFromStorage, err := d.resolveEnvFromStorage(ctx, agent)
 	if err != nil {
 		if d.debug {
@@ -1135,7 +1140,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *sto
 		}
 	} else if len(envFromStorage) > 0 {
 		for k, v := range envFromStorage {
-			if _, exists := resolvedEnv[k]; !exists {
+			if existing, exists := resolvedEnv[k]; !exists || existing == "" {
 				resolvedEnv[k] = v
 			}
 		}

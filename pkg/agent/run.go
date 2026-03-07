@@ -537,8 +537,16 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	agentEnv, envWarnings, missingEnvKeys := buildAgentEnv(finalScionCfg, opts.Env)
 	if len(missingEnvKeys) > 0 {
 		sort.Strings(missingEnvKeys)
-		return nil, fmt.Errorf("cannot start agent: %d required environment variable(s) have no value: %s",
-			len(missingEnvKeys), strings.Join(missingEnvKeys, ", "))
+		if opts.BrokerMode {
+			// In broker mode, empty env vars are passthrough markers that the
+			// hub didn't resolve (e.g., profile-level keys irrelevant to the
+			// selected harness). Warn but don't block agent start.
+			envWarnings = append(envWarnings, fmt.Sprintf("Warning: %d environment variable(s) have no value and will be omitted: %s",
+				len(missingEnvKeys), strings.Join(missingEnvKeys, ", ")))
+		} else {
+			return nil, fmt.Errorf("cannot start agent: %d required environment variable(s) have no value: %s",
+				len(missingEnvKeys), strings.Join(missingEnvKeys, ", "))
+		}
 	}
 	warnings = append(warnings, envWarnings...)
 

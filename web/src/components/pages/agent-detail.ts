@@ -670,6 +670,7 @@ export class ScionPageAgentDetail extends LitElement {
 
   private formatDate(dateString: string): string {
     try {
+      if (this.isZeroDate(dateString)) return '—';
       const date = new Date(dateString);
       return new Intl.DateTimeFormat('en', {
         month: 'short',
@@ -683,8 +684,15 @@ export class ScionPageAgentDetail extends LitElement {
     }
   }
 
+  private isZeroDate(dateString: string): boolean {
+    if (!dateString) return true;
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) || date.getFullYear() < 2000;
+  }
+
   private formatRelativeTime(dateString: string): string {
     try {
+      if (this.isZeroDate(dateString)) return '—';
       const date = new Date(dateString);
       const diffMs = Date.now() - date.getTime();
       const diffSeconds = Math.round(diffMs / 1000);
@@ -1119,8 +1127,8 @@ export class ScionPageAgentDetail extends LitElement {
   }
 
   private renderConnectivityCard(agent: Agent) {
-    const lastSeenStr =
-      agent.lastSeen || agent.updated || agent.updatedAt || agent.created || agent.createdAt || '';
+    const candidates = [agent.lastSeen, agent.updated, agent.updatedAt, agent.created, agent.createdAt];
+    const lastSeenStr = candidates.find((d) => d && !this.isZeroDate(d)) || '';
     return html`
       <div class="card">
         <h3 class="card-title">Connectivity</h3>

@@ -807,6 +807,14 @@ func (ws *WebServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Disable the server's WriteTimeout for this long-lived SSE connection.
+	// Without this, the global WriteTimeout (e.g. 60s) kills the stream,
+	// causing reconnection churn and wasted connection-pool slots.
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		slog.Debug("Failed to clear write deadline for SSE", "error", err)
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

@@ -25,8 +25,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { apiFetch } from '../../client/api.js';
-import { SSEClient } from '../../client/sse-client.js';
-import type { SSEUpdateEvent } from '../../client/sse-client.js';
+import { stateManager } from '../../client/state.js';
 import type { User, Notification } from '../../shared/types.js';
 
 const POLL_INTERVAL_MS = 5 * 60_000; // 5 minutes — fallback only; SSE delivers in real-time
@@ -41,8 +40,8 @@ export class ScionNotificationTray extends LitElement {
   @state() private open = false;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private sseClient: SSEClient | null = null;
   private boundOnClickOutside = this.onClickOutside.bind(this);
+  private boundOnNotification = this.onNotificationEvent.bind(this);
 
   /** IDs already seen — used to detect genuinely new notifications. */
   private seenIds = new Set<string>();
@@ -59,14 +58,14 @@ export class ScionNotificationTray extends LitElement {
     if (this.user) {
       void this.fetchNotifications();
       this.startPolling();
-      this.connectSSE();
+      this.listenForNotifications();
     }
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.stopPolling();
-    this.disconnectSSE();
+    this.stopListeningForNotifications();
     document.removeEventListener('click', this.boundOnClickOutside, true);
   }
 
@@ -75,10 +74,10 @@ export class ScionNotificationTray extends LitElement {
       if (this.user) {
         void this.fetchNotifications();
         this.startPolling();
-        this.connectSSE();
+        this.listenForNotifications();
       } else {
         this.stopPolling();
-        this.disconnectSSE();
+        this.stopListeningForNotifications();
         this.notifications = [];
       }
     }
@@ -112,35 +111,21 @@ export class ScionNotificationTray extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
-  // SSE (real-time delivery)
+  // Real-time delivery (via shared stateManager SSE connection)
   // ---------------------------------------------------------------------------
 
-  private connectSSE(): void {
-    if (this.sseClient) return;
-    this.sseClient = new SSEClient();
-    this.sseClient.addEventListener('update', (e: CustomEvent<SSEUpdateEvent>) => {
-      const { subject, data } = e.detail;
-      if (subject === 'notification.created') {
-        this.handleSSENotification(data as Notification);
-      }
-    });
-    this.sseClient.connect(['notification.>']);
+  private listenForNotifications(): void {
+    stateManager.addEventListener('notification-created', this.boundOnNotification);
   }
 
-  private disconnectSSE(): void {
-    if (this.sseClient) {
-      this.sseClient.disconnect();
-      this.sseClient = null;
-    }
+  private stopListeningForNotifications(): void {
+    stateManager.removeEventListener('notification-created', this.boundOnNotification);
   }
 
-  private handleSSENotification(n: Notification): void {
-    // Skip if already in the list (dedup)
-    if (this.notifications.some((existing) => existing.id === n.id)) return;
-
-    this.notifications = [n, ...this.notifications];
-    this.seenIds.add(n.id);
-    this.dispatchBrowserNotification(n);
+  private onNotificationEvent(): void {
+    // The stateManager fires notification-created when a notification SSE
+    // event arrives. Re-fetch to get the full notification objects.
+    void this.fetchNotifications();
   }
 
   // ---------------------------------------------------------------------------

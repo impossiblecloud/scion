@@ -60,7 +60,8 @@ export type StateEventType =
   | 'brokers-updated'
   | 'connected'
   | 'disconnected'
-  | 'scope-changed';
+  | 'scope-changed'
+  | 'notification-created';
 
 export class StateManager extends EventTarget {
   private state: AppState = {
@@ -156,29 +157,26 @@ export class StateManager extends EventTarget {
   /**
    * Map view scope to event subject patterns.
    * Matches the subscription tiers defined in §12.2.
+   * notification.> is always included so the notification tray shares the
+   * single SSE connection rather than opening its own (avoids exhausting
+   * the browser's 6-connection-per-origin HTTP/1.1 limit).
    */
   private subjectsForScope(scope: ViewScope): string[] {
     switch (scope.type) {
       case 'dashboard':
-        // All grove-scoped events: lifecycle (created/updated/deleted) and agent changes
-        return ['grove.>'];
+        return ['grove.>', 'notification.>'];
 
       case 'grove':
-        // Grove-level wildcard: all lightweight/medium events for agents in this grove
-        return [`grove.${scope.groveId}.>`];
+        return [`grove.${scope.groveId}.>`, 'notification.>'];
 
       case 'agent-detail':
-        // Keep grove subscription for breadcrumb/sidebar freshness.
-        // Add agent-specific subscription for heavy events (harness output).
-        return [`grove.${scope.groveId}.>`, `agent.${scope.agentId}.>`];
+        return [`grove.${scope.groveId}.>`, `agent.${scope.agentId}.>`, 'notification.>'];
 
       case 'brokers-list':
-        // All broker-scoped events: status changes
-        return ['broker.>'];
+        return ['broker.>', 'notification.>'];
 
       case 'broker-detail':
-        // Broker-specific events
-        return ['broker.>'];
+        return ['broker.>', 'notification.>'];
     }
   }
 
@@ -202,6 +200,12 @@ export class StateManager extends EventTarget {
   private handleUpdate(update: SSEUpdateEvent): void {
     const { subject, data } = update;
     const parts = subject.split('.');
+
+    // Notification events: notification.created
+    if (parts[0] === 'notification') {
+      this.notify('notification-created');
+      return;
+    }
 
     // Broker-scoped events: broker.{brokerId}.{eventType}
     if (parts[0] === 'broker' && parts.length >= 3) {

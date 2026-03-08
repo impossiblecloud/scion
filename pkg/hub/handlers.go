@@ -1528,6 +1528,17 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		plainMessage = req.StructuredMessage.Msg
 	} else if req.Message != "" {
 		plainMessage = req.Message
+		// Build a structured message from the plain text so that downstream
+		// logging and the broker receive a fully-populated payload.
+		sender := "user:unknown"
+		if user := GetUserIdentityFromContext(ctx); user != nil {
+			if name := user.DisplayName(); name != "" {
+				sender = "user:" + name
+			} else if email := user.Email(); email != "" {
+				sender = "user:" + email
+			}
+		}
+		structuredMsg = messages.NewInstruction(sender, "agent:"+id, plainMessage)
 	} else {
 		ValidationError(w, "message or structured_message is required", nil)
 		return

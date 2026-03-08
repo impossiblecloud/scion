@@ -3007,3 +3007,66 @@ func TestCreateAgent_RestartNoSubscriptionWithoutNotify(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, subs, 0, "expected no notification subscription without Notify flag")
 }
+
+func TestHandleAgentMessage_PlainTextBuildsStructuredMessage(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:   "grove-msg",
+		Name: "Msg Test Grove",
+		Slug: "msg-test-grove",
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-msg",
+		Name:   "Msg Test Broker",
+		Slug:   "msg-test-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Status:     store.BrokerStatusOnline,
+	}))
+
+	agent := &store.Agent{
+		ID:              "agent-msg-1",
+		Slug:            "agent-msg-1",
+		Name:            "Msg Agent",
+		GroveID:         grove.ID,
+		RuntimeBrokerID: broker.ID,
+		Phase:           string(state.PhaseRunning),
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	disp := &recordingDispatcher{}
+	srv.SetDispatcher(disp)
+
+	// Send a plain-text message (no structured_message field)
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents/"+agent.ID+"/message", map[string]interface{}{
+		"message":   "hello from the UI",
+		"interrupt": false,
+	})
+	require.Equal(t, http.StatusOK, rec.Code, "response body: %s", rec.Body.String())
+
+	calls := disp.getCalls()
+	require.Len(t, calls, 1, "expected exactly one dispatch call")
+
+	call := calls[0]
+	assert.Equal(t, "hello from the UI", call.Message)
+	require.NotNil(t, call.StructuredMessage, "expected a StructuredMessage to be constructed from the plain text")
+
+	sm := call.StructuredMessage
+	assert.Equal(t, messages.Version, sm.Version)
+	assert.Equal(t, messages.TypeInstruction, sm.Type)
+	assert.Equal(t, "hello from the UI", sm.Msg)
+	assert.Equal(t, "agent:"+agent.ID, sm.Recipient)
+	// Dev auth sets DisplayName to "Development User"
+	assert.Equal(t, "user:Development User", sm.Sender)
+	assert.NotEmpty(t, sm.Timestamp)
+}

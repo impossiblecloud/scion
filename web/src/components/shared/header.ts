@@ -299,7 +299,7 @@ export class ScionHeader extends LitElement {
 
     return html`
       <div class="user-buttons">
-        <a href="/profile" class="profile-link">
+        <a href="/profile" class="profile-link" @click=${(e: Event): void => this.handleProfileClick(e)}>
           <sl-icon name="person"></sl-icon>
           Profile
         </a>
@@ -336,6 +336,20 @@ export class ScionHeader extends LitElement {
     this.dispatchEvent(
       new CustomEvent('theme-change', {
         detail: { theme: newTheme },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  /**
+   * Handle profile link click with client-side navigation
+   */
+  private handleProfileClick(e: Event): void {
+    e.preventDefault();
+    this.dispatchEvent(
+      new CustomEvent('nav-click', {
+        detail: { path: '/profile' },
         bubbles: true,
         composed: true,
       })

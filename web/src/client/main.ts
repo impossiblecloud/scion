@@ -281,16 +281,29 @@ function resolveRoute(path: string): string {
 }
 
 /**
- * Renders the page component for the given path into #app
+ * Determines which shell type a route tag requires.
+ */
+type ShellType = 'standalone' | 'profile' | 'app';
+
+function getShellType(tag: string): ShellType {
+  if (STANDALONE_ROUTES.has(tag)) return 'standalone';
+  if (PROFILE_ROUTES.has(tag)) return 'profile';
+  return 'app';
+}
+
+/** Cached shell element and its type, reused across navigations */
+let activeShell: { type: ShellType; element: HTMLElement } | null = null;
+
+/**
+ * Renders the page component for the given path into #app.
+ * Reuses the shell element (sidebar, header, etc.) when possible
+ * to avoid full-page redraws on navigation.
  */
 function renderRoute(path: string): void {
   const appContainer = document.getElementById('app');
   if (!appContainer) return;
 
   const tag = resolveRoute(path);
-
-  // Clear previous content
-  appContainer.innerHTML = '';
 
   // Build page data with current user context for page components.
   // Include SSR-prefetched data on the initial render so page components
@@ -313,34 +326,54 @@ function renderRoute(path: string): void {
     return;
   }
 
-  if (STANDALONE_ROUTES.has(tag)) {
-    // Standalone pages render without the app shell
+  const shellType = getShellType(tag);
+
+  // If the shell type changed, tear down and rebuild
+  if (activeShell && activeShell.type !== shellType) {
+    appContainer.innerHTML = '';
+    activeShell = null;
+  }
+
+  if (shellType === 'standalone') {
+    // Standalone pages render without a persistent shell
+    appContainer.innerHTML = '';
+    activeShell = null;
     const page = document.createElement(tag);
     appContainer.appendChild(page);
-  } else if (PROFILE_ROUTES.has(tag)) {
-    // Profile pages render inside the profile shell
-    const shell = document.createElement('scion-profile-shell') as HTMLElement & {
+  } else if (activeShell) {
+    // Reuse existing shell — just update properties and swap page content
+    const shell = activeShell.element as HTMLElement & {
       currentPath: string;
       user: User | null;
     };
     shell.currentPath = path;
     shell.user = currentUser;
+
+    // Replace only the page content inside the shell
+    const oldPage = shell.querySelector('[data-scion-page]');
+    if (oldPage) oldPage.remove();
+
     const page = document.createElement(tag) as HTMLElement & { pageData: PageData };
     page.pageData = pageData;
+    page.setAttribute('data-scion-page', '');
     shell.appendChild(page);
-    appContainer.appendChild(shell);
   } else {
-    // Wrapped pages render inside the app shell
-    const shell = document.createElement('scion-app') as HTMLElement & {
+    // Create the shell for the first time
+    const shellTag = shellType === 'profile' ? 'scion-profile-shell' : 'scion-app';
+    const shell = document.createElement(shellTag) as HTMLElement & {
       currentPath: string;
       user: User | null;
     };
     shell.currentPath = path;
     shell.user = currentUser;
+
     const page = document.createElement(tag) as HTMLElement & { pageData: PageData };
     page.pageData = pageData;
+    page.setAttribute('data-scion-page', '');
     shell.appendChild(page);
     appContainer.appendChild(shell);
+
+    activeShell = { type: shellType, element: shell };
   }
 }
 
@@ -348,10 +381,18 @@ function renderRoute(path: string): void {
  * Sets up the client-side router for navigation
  */
 function setupRouter(): void {
-  // Add click handlers for client-side navigation
+  // Add click handlers for client-side navigation.
+  // Use the composed event path to find anchors inside shadow DOMs,
+  // since target.closest('a') cannot cross shadow boundaries.
   document.addEventListener('click', (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    const anchor = target.closest('a');
+    const path = e.composedPath();
+    let anchor: HTMLAnchorElement | null = null;
+    for (const el of path) {
+      if (el instanceof HTMLAnchorElement) {
+        anchor = el;
+        break;
+      }
+    }
 
     if (!anchor) return;
 
@@ -374,6 +415,15 @@ function setupRouter(): void {
     e.preventDefault();
     navigateTo(href);
   });
+
+  // Handle nav-click events from shadow DOM components (e.g. sidebar nav)
+  // These events use composed:true to cross shadow boundaries.
+  document.addEventListener('nav-click', ((e: CustomEvent<{ path: string }>) => {
+    const path = e.detail?.path;
+    if (path) {
+      navigateTo(path);
+    }
+  }) as EventListener);
 
   // Handle browser back/forward
   window.addEventListener('popstate', () => {

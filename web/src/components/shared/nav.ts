@@ -441,10 +441,13 @@ export class ScionNav extends LitElement {
   }
 
   /**
-   * Handle navigation link click
+   * Handle navigation link click.
+   * Prevents default browser navigation and dispatches a custom event
+   * so the client-side router can handle it without a full page reload.
    */
-  private handleNavClick(_e: Event, path: string): void {
-    // Dispatch a custom event for the app shell to handle
+  private handleNavClick(e: Event, path: string): void {
+    e.preventDefault();
+    // Dispatch a custom event for the app shell and router to handle
     this.dispatchEvent(
       new CustomEvent('nav-click', {
         detail: { path },

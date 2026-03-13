@@ -496,8 +496,38 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		}
 	}
 
-	// Step 3: Inject agent instructions
+	// Step 3: Copy skills directories into harness-specific location
 	h := harness.New(finalScionCfg.Harness)
+	skillsDir := h.SkillsDir()
+	if skillsDir != "" {
+		skillsDest := filepath.Join(agentHome, skillsDir)
+
+		// Copy skills from harness-config base layer
+		hcSkills := filepath.Join(hcDir.Path, "skills")
+		if info, err := os.Stat(hcSkills); err == nil && info.IsDir() {
+			if err := os.MkdirAll(skillsDest, 0755); err != nil {
+				return "", "", nil, fmt.Errorf("failed to create skills dir: %w", err)
+			}
+			if err := util.CopyDir(hcSkills, skillsDest); err != nil {
+				return "", "", nil, fmt.Errorf("failed to copy harness-config skills: %w", err)
+			}
+		}
+
+		// Copy skills from each template in the chain (overlay behavior)
+		for _, tpl := range chain {
+			tplSkills := filepath.Join(tpl.Path, "skills")
+			if info, err := os.Stat(tplSkills); err == nil && info.IsDir() {
+				if err := os.MkdirAll(skillsDest, 0755); err != nil {
+					return "", "", nil, fmt.Errorf("failed to create skills dir: %w", err)
+				}
+				if err := util.CopyDir(tplSkills, skillsDest); err != nil {
+					return "", "", nil, fmt.Errorf("failed to copy template skills %s: %w", tpl.Name, err)
+				}
+			}
+		}
+	}
+
+	// Step 4: Inject agent instructions
 
 	// Determine whether inline config provided content directly (already resolved).
 	// If so, we skip template-based file resolution for that field.
@@ -549,7 +579,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 			util.Debugf("ProvisionAgent: no agent_instructions configured and no agents.md found in template")
 		}
 
-		// Step 4: Inject system prompt
+		// Step 5: Inject system prompt
 		// Convention-based auto-detection for system prompt as well.
 		if finalScionCfg.SystemPrompt == "" {
 			conventionPath := filepath.Join(lastTpl.Path, "system-prompt.md")
@@ -599,7 +629,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		}
 	}
 
-	// Step 5: Copy common files (.tmux.conf, .zshrc)
+	// Step 6: Copy common files (.tmux.conf, .zshrc)
 	if err := config.SeedCommonFilesToHome(agentHome, false); err != nil {
 		return "", "", nil, fmt.Errorf("failed to seed common files: %w", err)
 	}

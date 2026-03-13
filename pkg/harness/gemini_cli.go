@@ -85,6 +85,10 @@ func (g *GeminiCLI) DefaultConfigDir() string {
 	return ".gemini"
 }
 
+func (g *GeminiCLI) SkillsDir() string {
+	return ".gemini/skills"
+}
+
 func (g *GeminiCLI) HasSystemPrompt(agentHome string) bool {
 	return g.getSystemPromptRelPath(agentHome) != ""
 }

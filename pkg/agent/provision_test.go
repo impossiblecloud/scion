@@ -831,3 +831,111 @@ func TestAppendExtraInstructions(t *testing.T) {
 		}
 	})
 }
+
+func TestProvisionAgent_CopiesSkillsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+	globalTemplatesDir := filepath.Join(globalScionDir, "templates")
+	os.MkdirAll(globalTemplatesDir, 0755)
+
+	// Create a harness-config for claude
+	seedTestHarnessConfig(t, globalScionDir, "claude", "claude")
+
+	// Create a template with a skills/ directory containing a skill
+	tplDir := filepath.Join(globalTemplatesDir, "skills-tpl")
+	os.MkdirAll(tplDir, 0755)
+	tplConfig := `{"default_harness_config": "claude"}`
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(tplConfig), 0644)
+
+	// Create skills in the template
+	skillDir := filepath.Join(tplDir, "skills", "my-skill")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# My Skill\nDoes things."), 0644)
+
+	// Project settings
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	agentName := "skills-agent"
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "skills-tpl", "", "", projectScionDir, "", "", "", "")
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed: %v", err)
+	}
+
+	// Claude harness should place skills at .claude/skills/
+	skillMdPath := filepath.Join(agentHome, ".claude", "skills", "my-skill", "SKILL.md")
+	data, err := os.ReadFile(skillMdPath)
+	if err != nil {
+		t.Fatalf("expected skill file at %s, got error: %v", skillMdPath, err)
+	}
+	if !strings.Contains(string(data), "My Skill") {
+		t.Errorf("expected skill content to contain 'My Skill', got: %s", string(data))
+	}
+}
+
+func TestProvisionAgent_SkillsDirOverlay(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+	globalTemplatesDir := filepath.Join(globalScionDir, "templates")
+	os.MkdirAll(globalTemplatesDir, 0755)
+
+	// Create a harness-config for gemini with its own skills
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "gemini")
+	os.MkdirAll(hcDir, 0755)
+	configYAML := "harness: gemini\nimage: test-image:latest\n"
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte(configYAML), 0644)
+
+	hcSkillDir := filepath.Join(hcDir, "skills", "base-skill")
+	os.MkdirAll(hcSkillDir, 0755)
+	os.WriteFile(filepath.Join(hcSkillDir, "SKILL.md"), []byte("# Base Skill"), 0644)
+
+	// Create a template with a different skill
+	tplDir := filepath.Join(globalTemplatesDir, "overlay-tpl")
+	os.MkdirAll(tplDir, 0755)
+	tplConfig := `{"default_harness_config": "gemini"}`
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(tplConfig), 0644)
+
+	tplSkillDir := filepath.Join(tplDir, "skills", "tpl-skill")
+	os.MkdirAll(tplSkillDir, 0755)
+	os.WriteFile(filepath.Join(tplSkillDir, "SKILL.md"), []byte("# Template Skill"), 0644)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	agentName := "overlay-agent"
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "overlay-tpl", "", "", projectScionDir, "", "", "", "")
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed: %v", err)
+	}
+
+	// Both skills should exist (overlay/merge behavior)
+	baseSkillPath := filepath.Join(agentHome, ".gemini", "skills", "base-skill", "SKILL.md")
+	if _, err := os.Stat(baseSkillPath); err != nil {
+		t.Errorf("expected base skill from harness-config at %s, got error: %v", baseSkillPath, err)
+	}
+
+	tplSkillPath := filepath.Join(agentHome, ".gemini", "skills", "tpl-skill", "SKILL.md")
+	if _, err := os.Stat(tplSkillPath); err != nil {
+		t.Errorf("expected template skill at %s, got error: %v", tplSkillPath, err)
+	}
+}

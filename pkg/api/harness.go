@@ -26,6 +26,7 @@ type Harness interface {
 	GetEnv(agentName string, agentHome string, unixUsername string) map[string]string
 	GetCommand(task string, resume bool, baseArgs []string) []string
 	DefaultConfigDir() string
+	SkillsDir() string
 	HasSystemPrompt(agentHome string) bool
 
 	// Provision performs harness-specific setup during agent creation.

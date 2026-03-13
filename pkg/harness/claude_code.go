@@ -90,6 +90,10 @@ func (c *ClaudeCode) DefaultConfigDir() string {
 	return ".claude"
 }
 
+func (c *ClaudeCode) SkillsDir() string {
+	return ".claude/skills"
+}
+
 func (c *ClaudeCode) HasSystemPrompt(agentHome string) bool {
 	return c.loadSystemPrompt(agentHome) != ""
 }

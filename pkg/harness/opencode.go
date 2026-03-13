@@ -77,6 +77,10 @@ func (o *OpenCode) DefaultConfigDir() string {
 	return ".config/opencode"
 }
 
+func (o *OpenCode) SkillsDir() string {
+	return ".config/opencode/skills"
+}
+
 func (o *OpenCode) HasSystemPrompt(agentHome string) bool {
 	return false
 }

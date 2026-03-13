@@ -75,7 +75,11 @@ func (c *Codex) GetCommand(task string, resume bool, baseArgs []string) []string
 }
 
 func (c *Codex) DefaultConfigDir() string {
-	return ""
+	return ".codex"
+}
+
+func (c *Codex) SkillsDir() string {
+	return ".codex/skills"
 }
 
 func (c *Codex) HasSystemPrompt(agentHome string) bool {

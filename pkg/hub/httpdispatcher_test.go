@@ -426,7 +426,7 @@ func TestHTTPRuntimeBrokerClient_StartAgent_InvalidJSONFails(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPRuntimeBrokerClient()
-	_, err := client.StartAgent(context.Background(), "host-1", server.URL, "test-agent", "", "", "", "", nil, nil, nil)
+	_, err := client.StartAgent(context.Background(), "host-1", server.URL, "test-agent", "", "", "", "", nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected StartAgent to fail on invalid JSON response")
 	}
@@ -584,6 +584,10 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate_WithGroveProviderPath(t *testin
 }
 
 func TestHTTPAgentDispatcher_DispatchAgentCreate_MissingBrokerEndpoint(t *testing.T) {
+	// When a broker has no HTTP endpoint configured (e.g. control-channel-only
+	// brokers behind NAT), the dispatcher should still pass the call through
+	// to the client. The HybridBrokerClient will route via the control channel
+	// when connected; the HTTP transport will fail with a clear error if not.
 	ctx := context.Background()
 	memStore := createTestStore(t)
 
@@ -608,14 +612,25 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate_MissingBrokerEndpoint(t *testin
 	}
 
 	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("expected DispatchAgentCreate to succeed (client handles empty endpoint), got: %v", err)
+	}
+	if !mockClient.createCalled {
+		t.Fatal("expected CreateAgent to be called even with empty endpoint")
+	}
+	if mockClient.lastEndpoint != "" {
+		t.Errorf("expected empty endpoint, got %q", mockClient.lastEndpoint)
+	}
+}
+
+func TestBrokerHTTPTransport_RejectsEmptyEndpoint(t *testing.T) {
+	transport := newBrokerHTTPTransport(false, nil)
+	_, err := transport.CreateAgent(context.Background(), "broker-1", "", &RemoteCreateAgentRequest{})
 	if err == nil {
-		t.Fatal("expected DispatchAgentCreate to fail when broker endpoint is missing")
+		t.Fatal("expected error when endpoint is empty")
 	}
-	if !strings.Contains(err.Error(), "has no endpoint configured") {
-		t.Fatalf("expected endpoint validation error, got: %v", err)
-	}
-	if mockClient.createCalled {
-		t.Fatal("expected CreateAgent not to be called when endpoint is missing")
+	if !strings.Contains(err.Error(), "no HTTP endpoint configured") {
+		t.Fatalf("expected clear endpoint error, got: %v", err)
 	}
 }
 

@@ -78,6 +78,10 @@ func newBrokerHTTPTransport(debug bool, signer brokerRequestSigner) *brokerHTTPT
 }
 
 func (t *brokerHTTPTransport) doRequest(ctx context.Context, brokerID, method, endpoint string, body []byte) (*http.Response, error) {
+	if endpoint == "" || !strings.Contains(endpoint, "://") {
+		return nil, fmt.Errorf("runtime broker %q has no HTTP endpoint configured (control channel may be required)", brokerID)
+	}
+
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)

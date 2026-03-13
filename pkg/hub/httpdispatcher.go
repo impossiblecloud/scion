@@ -156,14 +156,14 @@ func (d *HTTPAgentDispatcher) SetDevAuthToken(token string) {
 }
 
 // getBrokerEndpoint retrieves the endpoint URL for a runtime broker.
+// Returns an empty string without error when no endpoint is configured,
+// which is normal for brokers that connect via WebSocket control channel.
+// The HybridBrokerClient will route through the control channel when
+// available; only the HTTP fallback path requires a non-empty endpoint.
 func (d *HTTPAgentDispatcher) getBrokerEndpoint(ctx context.Context, brokerID string) (string, error) {
 	broker, err := d.store.GetRuntimeBroker(ctx, brokerID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get runtime broker: %w", err)
-	}
-
-	if broker.Endpoint == "" {
-		return "", fmt.Errorf("runtime broker %q has no endpoint configured", broker.ID)
 	}
 
 	return broker.Endpoint, nil

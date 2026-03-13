@@ -3434,15 +3434,10 @@ func (s *Server) cleanupBrokerGroveDirectories(ctx context.Context, grove *store
 			continue
 		}
 
-		endpoint := broker.Endpoint
-		if endpoint == "" {
-			continue
-		}
-
-		if err := client.CleanupGrove(ctx, provider.BrokerID, endpoint, grove.Slug); err != nil {
+		if err := client.CleanupGrove(ctx, provider.BrokerID, broker.Endpoint, grove.Slug); err != nil {
 			slog.Warn("failed to cleanup grove on broker",
 				"grove", grove.ID, "slug", grove.Slug,
-				"broker", provider.BrokerID, "endpoint", endpoint, "error", err)
+				"broker", provider.BrokerID, "endpoint", broker.Endpoint, "error", err)
 		}
 	}
 }

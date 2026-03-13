@@ -212,7 +212,7 @@ func TestAuthenticatedBrokerClient_StartAgent(t *testing.T) {
 	client := NewAuthenticatedBrokerClient(db, false)
 
 	// Make request
-	resp, err := client.StartAgent(context.Background(), brokerID, server.URL, "my-agent", "", "", "", "", nil, nil, nil)
+	resp, err := client.StartAgent(context.Background(), brokerID, server.URL, "my-agent", "", "", "", "", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("StartAgent failed: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestAuthenticatedBrokerClient_StartAgent_InvalidJSONFails(t *testing.T) {
 	defer server.Close()
 
 	client := NewAuthenticatedBrokerClient(db, false)
-	_, err = client.StartAgent(context.Background(), brokerID, server.URL, "agent-1", "", "", "", "", nil, nil, nil)
+	_, err = client.StartAgent(context.Background(), brokerID, server.URL, "agent-1", "", "", "", "", nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected StartAgent to fail on invalid JSON response")
 	}

@@ -748,8 +748,8 @@ export class ScionPageGroveDetail extends LitElement {
 
   private renderGroveIcon() {
     if (!this.grove) return nothing;
-    const type = this.grove.groveType || (this.grove.gitRemote ? 'git' : 'hub-native');
-    const icon = { 'git': 'diagram-3', 'linked': 'link-45deg', 'hub-native': 'folder-fill' }[type] ?? 'folder-fill';
+    const type = this.grove.groveType || 'hub-native';
+    const icon = { 'linked': 'link-45deg', 'hub-native': 'folder-fill' }[type] ?? 'folder-fill';
     return html`<sl-icon name=${icon}></sl-icon>`;
   }
 
@@ -1056,7 +1056,7 @@ export class ScionPageGroveDetail extends LitElement {
               size="small"
             ></scion-status-badge>
           </div>
-          <div class="header-path">${this.grove.gitRemote || (this.grove.groveType === 'linked' ? 'Broker Linked' : 'Hub Workspace')}</div>
+          <div class="header-path">${this.grove.gitRemote || (this.grove.groveType === 'linked' ? 'Linked grove' : 'Hub Workspace')}</div>
         </div>
         <div class="header-actions">
           ${can(this.agentScopeCapabilities, 'create')

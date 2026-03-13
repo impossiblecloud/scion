@@ -297,12 +297,12 @@ export class ScionPageGroves extends LitElement {
   }
 
   private groveTypeConfig(grove: Grove) {
-    const type = grove.groveType || (grove.gitRemote ? 'git' : 'hub-native');
-    return {
-      'git': { icon: 'diagram-3', label: 'Git-backed grove' },
-      'linked': { icon: 'link-45deg', label: 'Broker Linked' },
+    const type = grove.groveType || 'hub-native';
+    const config = {
+      'linked': { icon: 'link-45deg', label: 'Linked grove' },
       'hub-native': { icon: 'folder-fill', label: 'Hub workspace' },
-    }[type]!;
+    }[type] ?? { icon: 'folder-fill', label: 'Hub workspace' };
+    return config;
   }
 
   private renderGroveIcon(grove: Grove, withTooltip = false) {

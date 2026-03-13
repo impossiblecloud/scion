@@ -121,7 +121,7 @@ export type GroveStatus = 'active' | 'inactive' | 'error';
 /**
  * Grove type enumeration
  */
-export type GroveType = 'git' | 'linked' | 'hub-native';
+export type GroveType = 'linked' | 'hub-native';
 
 export interface Grove {
   id: string;

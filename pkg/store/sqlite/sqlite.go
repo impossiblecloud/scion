@@ -1463,12 +1463,10 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 	return grove, nil
 }
 
-// populateGroveType sets the computed GroveType field based on git remote and provider paths.
+// populateGroveType sets the computed GroveType field based on how the grove was established.
+// Type is "linked" (pre-existing local grove linked to Hub) or "hub-native" (created via Hub).
+// Whether a grove is git-backed is orthogonal — indicated by the GitRemote field.
 func (s *SQLiteStore) populateGroveType(ctx context.Context, grove *store.Grove) {
-	if grove.GitRemote != "" {
-		grove.GroveType = store.GroveTypeGit
-		return
-	}
 	// Check if any provider has a local_path not under ~/.scion/groves/ (i.e. broker-linked)
 	var linkedCount int
 	s.db.QueryRowContext(ctx,

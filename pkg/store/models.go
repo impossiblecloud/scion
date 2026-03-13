@@ -126,9 +126,13 @@ type AgentAppliedConfig struct {
 
 
 // Grove type constants.
+// Type reflects how the grove was established on the Hub:
+//   - "linked": A pre-existing local grove linked to the Hub
+//   - "hub-native": Created via the Hub (web UI or API)
+//
+// Whether a grove is git-backed is orthogonal and indicated by the GitRemote field.
 const (
-	GroveTypeGit      = "git"       // Git-backed grove with a remote URL
-	GroveTypeLinked   = "linked"    // Broker-linked grove (local project linked to hub)
+	GroveTypeLinked    = "linked"     // Broker-linked grove (local project linked to hub)
 	GroveTypeHubNative = "hub-native" // Hub-native workspace
 )
 

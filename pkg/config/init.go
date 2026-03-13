@@ -218,14 +218,14 @@ func SeedFileFromFS(fs embed.FS, basePath, fileName, targetPath string, force, a
 }
 
 // GenerateGroveID creates a grove ID based on git context.
-// For git repos with remote: normalized remote URL (e.g., github.com/org/repo)
+// For git repos with remote: deterministic hash of the normalized remote URL
 // For git repos without remote: UUID
 // For non-git directories: UUID
 func GenerateGroveID() string {
 	if util.IsGitRepo() {
 		remote := util.GetGitRemote()
 		if remote != "" {
-			return util.NormalizeGitRemote(remote)
+			return util.HashGroveID(util.NormalizeGitRemote(remote))
 		}
 	}
 	return uuid.New().String()
@@ -236,7 +236,7 @@ func GenerateGroveIDForDir(dir string) string {
 	if util.IsGitRepoDir(dir) {
 		remote := util.GetGitRemoteDir(dir)
 		if remote != "" {
-			return util.NormalizeGitRemote(remote)
+			return util.HashGroveID(util.NormalizeGitRemote(remote))
 		}
 	}
 	return uuid.New().String()

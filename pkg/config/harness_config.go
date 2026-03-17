@@ -106,7 +106,7 @@ func FindHarnessConfigDir(name string, grovePath string, templatePaths ...string
 	if name == "generic" {
 		return &HarnessConfigDir{
 			Name:   "generic",
-			Config: HarnessConfigEntry{Harness: "generic"},
+			Config: HarnessConfigEntry{Harness: "generic", Image: "scion-base:latest", User: "scion"},
 		}, nil
 	}
 

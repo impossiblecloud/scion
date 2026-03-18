@@ -160,6 +160,7 @@ func setupNotificationTest(t *testing.T) *notificationTestEnv {
 
 	sub := &store.NotificationSubscription{
 		ID:              api.NewUUID(),
+		Scope:           store.SubscriptionScopeAgent,
 		AgentID:         watched.ID,
 		SubscriberType:  store.SubscriberTypeAgent,
 		SubscriberID:    subscriber.Slug,
@@ -879,4 +880,80 @@ func TestNotificationDispatcher_ErrorPhaseNotMatchedWithoutSubscription(t *testi
 
 	// Should not trigger since default sub only has COMPLETED and WAITING_FOR_INPUT
 	assert.Empty(t, env.dispatcher.getCalls())
+}
+
+func TestNotificationDispatcher_GroveScopedSubscription(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Delete the agent-scoped subscription
+	ctx := context.Background()
+	require.NoError(t, env.store.DeleteNotificationSubscription(ctx, env.sub.ID))
+
+	// Create a grove-scoped user subscription
+	groveSub := &store.NotificationSubscription{
+		ID:                api.NewUUID(),
+		Scope:             store.SubscriptionScopeGrove,
+		SubscriberType:    store.SubscriberTypeUser,
+		SubscriberID:      "grove-watcher",
+		GroveID:           env.grove.ID,
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         "test",
+	}
+	require.NoError(t, env.store.CreateNotificationSubscription(ctx, groveSub))
+
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.publishStatus("completed")
+
+	// Wait for notification to be stored
+	require.Eventually(t, func() bool {
+		notifs, _ := env.store.GetNotifications(ctx, store.SubscriberTypeUser, "grove-watcher", false)
+		return len(notifs) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	notifs, err := env.store.GetNotifications(ctx, store.SubscriberTypeUser, "grove-watcher", false)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 1)
+	assert.Equal(t, "COMPLETED", notifs[0].Status)
+}
+
+func TestNotificationDispatcher_DeduplicateAcrossScopes(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Keep the existing agent-scoped subscription (subscriber-agent watches watched-agent).
+	// Add a grove-scoped subscription for the SAME subscriber.
+	ctx := context.Background()
+	groveSub := &store.NotificationSubscription{
+		ID:                api.NewUUID(),
+		Scope:             store.SubscriptionScopeGrove,
+		SubscriberType:    store.SubscriberTypeAgent,
+		SubscriberID:      env.subscriber.Slug,
+		GroveID:           env.grove.ID,
+		TriggerActivities: []string{"COMPLETED", "WAITING_FOR_INPUT"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         "test",
+	}
+	require.NoError(t, env.store.CreateNotificationSubscription(ctx, groveSub))
+
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.publishStatus("completed")
+
+	require.Eventually(t, func() bool {
+		return len(env.dispatcher.getCalls()) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	// Wait a bit to ensure no second dispatch
+	time.Sleep(200 * time.Millisecond)
+
+	// Should receive exactly 1 dispatch (deduplicated), not 2
+	assert.Len(t, env.dispatcher.getCalls(), 1)
+
+	// Only 1 notification stored (from the agent-scoped subscription, which was checked first)
+	notifs, err := env.store.GetNotifications(ctx, store.SubscriberTypeAgent, env.subscriber.Slug, false)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 1)
 }

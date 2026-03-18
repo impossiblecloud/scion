@@ -32,8 +32,25 @@ import (
 
 // CreateNotificationSubscription creates a new notification subscription.
 func (s *SQLiteStore) CreateNotificationSubscription(ctx context.Context, sub *store.NotificationSubscription) error {
-	if sub.ID == "" || sub.AgentID == "" || sub.SubscriberID == "" || sub.GroveID == "" {
+	if sub.ID == "" || sub.SubscriberID == "" || sub.GroveID == "" {
 		return store.ErrInvalidInput
+	}
+
+	// Default scope to agent for backward compatibility
+	if sub.Scope == "" {
+		sub.Scope = store.SubscriptionScopeAgent
+	}
+
+	// Validate scope-specific constraints
+	switch sub.Scope {
+	case store.SubscriptionScopeAgent:
+		if sub.AgentID == "" {
+			return store.ErrInvalidInput
+		}
+	case store.SubscriptionScopeGrove:
+		sub.AgentID = "" // Ensure no agent_id for grove-scoped
+	default:
+		return fmt.Errorf("invalid scope %q: %w", sub.Scope, store.ErrInvalidInput)
 	}
 
 	now := time.Now()
@@ -43,11 +60,11 @@ func (s *SQLiteStore) CreateNotificationSubscription(ctx context.Context, sub *s
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO notification_subscriptions (
-			id, agent_id, subscriber_type, subscriber_id, grove_id,
+			id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
 			trigger_activities, created_at, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		sub.ID, sub.AgentID, sub.SubscriberType, sub.SubscriberID, sub.GroveID,
+		sub.ID, sub.Scope, nullableString(sub.AgentID), sub.SubscriberType, sub.SubscriberID, sub.GroveID,
 		marshalJSON(sub.TriggerActivities), sub.CreatedAt, sub.CreatedBy,
 	)
 	if err != nil {
@@ -62,10 +79,40 @@ func (s *SQLiteStore) CreateNotificationSubscription(ctx context.Context, sub *s
 	return nil
 }
 
-// GetNotificationSubscriptions returns all subscriptions for a watched agent.
+// GetNotificationSubscription returns a single subscription by ID.
+func (s *SQLiteStore) GetNotificationSubscription(ctx context.Context, id string) (*store.NotificationSubscription, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
+			trigger_activities, created_at, created_by
+		FROM notification_subscriptions
+		WHERE id = ?
+	`, id)
+
+	var sub store.NotificationSubscription
+	var agentID sql.NullString
+	var triggerActivitiesJSON string
+
+	if err := row.Scan(
+		&sub.ID, &sub.Scope, &agentID, &sub.SubscriberType, &sub.SubscriberID, &sub.GroveID,
+		&triggerActivitiesJSON, &sub.CreatedAt, &sub.CreatedBy,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+
+	if agentID.Valid {
+		sub.AgentID = agentID.String
+	}
+	unmarshalJSON(triggerActivitiesJSON, &sub.TriggerActivities)
+	return &sub, nil
+}
+
+// GetNotificationSubscriptions returns all agent-scoped subscriptions for a watched agent.
 func (s *SQLiteStore) GetNotificationSubscriptions(ctx context.Context, agentID string) ([]store.NotificationSubscription, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, agent_id, subscriber_type, subscriber_id, grove_id,
+		SELECT id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
 			trigger_activities, created_at, created_by
 		FROM notification_subscriptions
 		WHERE agent_id = ?
@@ -79,15 +126,50 @@ func (s *SQLiteStore) GetNotificationSubscriptions(ctx context.Context, agentID 
 	return scanSubscriptions(rows)
 }
 
-// GetNotificationSubscriptionsByGrove returns all subscriptions within a grove.
+// GetNotificationSubscriptionsByGrove returns all subscriptions within a grove (any scope).
 func (s *SQLiteStore) GetNotificationSubscriptionsByGrove(ctx context.Context, groveID string) ([]store.NotificationSubscription, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, agent_id, subscriber_type, subscriber_id, grove_id,
+		SELECT id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
 			trigger_activities, created_at, created_by
 		FROM notification_subscriptions
 		WHERE grove_id = ?
 		ORDER BY created_at ASC
 	`, groveID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanSubscriptions(rows)
+}
+
+// GetNotificationSubscriptionsByGroveScope returns grove-scoped subscriptions
+// (scope='grove') for a given grove.
+func (s *SQLiteStore) GetNotificationSubscriptionsByGroveScope(ctx context.Context, groveID string) ([]store.NotificationSubscription, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
+			trigger_activities, created_at, created_by
+		FROM notification_subscriptions
+		WHERE grove_id = ? AND scope = 'grove'
+		ORDER BY created_at ASC
+	`, groveID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanSubscriptions(rows)
+}
+
+// GetSubscriptionsForSubscriber returns all subscriptions owned by a subscriber.
+func (s *SQLiteStore) GetSubscriptionsForSubscriber(ctx context.Context, subscriberType, subscriberID string) ([]store.NotificationSubscription, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, scope, agent_id, subscriber_type, subscriber_id, grove_id,
+			trigger_activities, created_at, created_by
+		FROM notification_subscriptions
+		WHERE subscriber_type = ? AND subscriber_id = ?
+		ORDER BY created_at ASC
+	`, subscriberType, subscriberID)
 	if err != nil {
 		return nil, err
 	}
@@ -301,15 +383,19 @@ func scanSubscriptions(rows *sql.Rows) ([]store.NotificationSubscription, error)
 	var subs []store.NotificationSubscription
 	for rows.Next() {
 		var sub store.NotificationSubscription
+		var agentID sql.NullString
 		var triggerActivitiesJSON string
 
 		if err := rows.Scan(
-			&sub.ID, &sub.AgentID, &sub.SubscriberType, &sub.SubscriberID, &sub.GroveID,
+			&sub.ID, &sub.Scope, &agentID, &sub.SubscriberType, &sub.SubscriberID, &sub.GroveID,
 			&triggerActivitiesJSON, &sub.CreatedAt, &sub.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
 
+		if agentID.Valid {
+			sub.AgentID = agentID.String
+		}
 		unmarshalJSON(triggerActivitiesJSON, &sub.TriggerActivities)
 		subs = append(subs, sub)
 	}

@@ -6880,6 +6880,7 @@ func (s *Server) createNotifySubscription(ctx context.Context, agentID, groveID,
 	}
 	sub := &store.NotificationSubscription{
 		ID:                api.NewUUID(),
+		Scope:             store.SubscriptionScopeAgent,
 		AgentID:           agentID,
 		SubscriberType:    notifySubscriberType,
 		SubscriberID:      notifySubscriberID,

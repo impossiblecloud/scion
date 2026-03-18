@@ -711,11 +711,22 @@ type NotificationStore interface {
 	// CreateNotificationSubscription creates a new notification subscription.
 	CreateNotificationSubscription(ctx context.Context, sub *NotificationSubscription) error
 
-	// GetNotificationSubscriptions returns all subscriptions for a watched agent.
+	// GetNotificationSubscription returns a single subscription by ID.
+	// Returns ErrNotFound if the subscription doesn't exist.
+	GetNotificationSubscription(ctx context.Context, id string) (*NotificationSubscription, error)
+
+	// GetNotificationSubscriptions returns all agent-scoped subscriptions for a watched agent.
 	GetNotificationSubscriptions(ctx context.Context, agentID string) ([]NotificationSubscription, error)
 
-	// GetNotificationSubscriptionsByGrove returns all subscriptions within a grove.
+	// GetNotificationSubscriptionsByGrove returns all subscriptions within a grove (any scope).
 	GetNotificationSubscriptionsByGrove(ctx context.Context, groveID string) ([]NotificationSubscription, error)
+
+	// GetNotificationSubscriptionsByGroveScope returns grove-scoped subscriptions
+	// (scope='grove') for a given grove.
+	GetNotificationSubscriptionsByGroveScope(ctx context.Context, groveID string) ([]NotificationSubscription, error)
+
+	// GetSubscriptionsForSubscriber returns all subscriptions owned by a subscriber.
+	GetSubscriptionsForSubscriber(ctx context.Context, subscriberType, subscriberID string) ([]NotificationSubscription, error)
 
 	// DeleteNotificationSubscription deletes a subscription by ID.
 	// Returns ErrNotFound if the subscription doesn't exist.

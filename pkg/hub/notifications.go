@@ -104,13 +104,25 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 	nd.log.Debug("Notification dispatcher received event",
 		"agentID", statusEvt.AgentID, "activity", statusEvt.Activity, "phase", statusEvt.Phase)
 
-	subs, err := nd.store.GetNotificationSubscriptions(ctx, statusEvt.AgentID)
+	// Collect subscriptions from both scopes: agent-scoped first (more specific),
+	// then grove-scoped.
+	agentSubs, err := nd.store.GetNotificationSubscriptions(ctx, statusEvt.AgentID)
 	if err != nil {
-		nd.log.Error("Failed to get notification subscriptions",
+		nd.log.Error("Failed to get agent notification subscriptions",
 			"agentID", statusEvt.AgentID, "error", err)
 		return
 	}
-	if len(subs) == 0 {
+
+	groveSubs, err := nd.store.GetNotificationSubscriptionsByGroveScope(ctx, statusEvt.GroveID)
+	if err != nil {
+		nd.log.Error("Failed to get grove notification subscriptions",
+			"groveID", statusEvt.GroveID, "error", err)
+		// Continue with agent-scoped only
+		groveSubs = nil
+	}
+
+	allSubs := append(agentSubs, groveSubs...)
+	if len(allSubs) == 0 {
 		return
 	}
 
@@ -122,10 +134,20 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 	}
 
 	nd.log.Debug("Notification dispatcher checking subscriptions",
-		"agentID", statusEvt.AgentID, "activity", matchStatus, "subscriptionCount", len(subs))
+		"agentID", statusEvt.AgentID, "activity", matchStatus, "subscriptionCount", len(allSubs))
 
-	for i := range subs {
-		sub := &subs[i]
+	// Deduplicate: one notification per (subscriber_type, subscriber_id).
+	// Agent-scoped subscriptions are checked first since they are more specific.
+	seen := make(map[string]bool)
+	for i := range allSubs {
+		sub := &allSubs[i]
+
+		// Dedup across overlapping scopes
+		dedupeKey := sub.SubscriberType + ":" + sub.SubscriberID
+		if seen[dedupeKey] {
+			continue
+		}
+
 		if !sub.MatchesActivity(matchStatus) {
 			continue
 		}
@@ -138,9 +160,11 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 			continue
 		}
 		if strings.EqualFold(lastStatus, matchStatus) {
+			seen[dedupeKey] = true
 			continue
 		}
 
+		seen[dedupeKey] = true
 		nd.storeAndDispatch(ctx, sub, statusEvt)
 	}
 }

@@ -105,6 +105,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV28,
 		migrationV29,
 		migrationV30,
+		migrationV31,
 	}
 
 	// Create migrations table if not exists
@@ -718,6 +719,43 @@ CREATE TABLE IF NOT EXISTS gcp_service_accounts (
 	UNIQUE(email, scope, scope_id)
 );
 CREATE INDEX IF NOT EXISTS idx_gcp_sa_scope ON gcp_service_accounts(scope, scope_id);
+`
+
+// Migration V31: Add scope column to notification_subscriptions and make agent_id nullable.
+// Enables grove-scoped subscriptions (watch all agents in a grove) in addition to
+// agent-scoped subscriptions. Adds unique constraint for deduplication.
+const migrationV31 = `
+-- SQLite doesn't support ALTER COLUMN, so we recreate the table.
+CREATE TABLE notification_subscriptions_new (
+	id TEXT PRIMARY KEY,
+	scope TEXT NOT NULL DEFAULT 'agent',
+	agent_id TEXT,
+	subscriber_type TEXT NOT NULL DEFAULT 'agent',
+	subscriber_id TEXT NOT NULL,
+	grove_id TEXT NOT NULL,
+	trigger_activities TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_by TEXT NOT NULL,
+	FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
+-- Copy existing data (all existing subscriptions are agent-scoped)
+INSERT INTO notification_subscriptions_new
+	(id, scope, agent_id, subscriber_type, subscriber_id, grove_id, trigger_activities, created_at, created_by)
+SELECT id, 'agent', agent_id, subscriber_type, subscriber_id, grove_id, trigger_activities, created_at, created_by
+FROM notification_subscriptions;
+
+DROP TABLE notification_subscriptions;
+ALTER TABLE notification_subscriptions_new RENAME TO notification_subscriptions;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_notification_subs_agent ON notification_subscriptions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_notification_subs_grove ON notification_subscriptions(grove_id);
+CREATE INDEX IF NOT EXISTS idx_notification_subs_subscriber ON notification_subscriptions(subscriber_type, subscriber_id);
+
+-- Unique constraint: one subscription per (scope, target, subscriber, grove)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_subs_unique
+	ON notification_subscriptions(scope, COALESCE(agent_id, ''), subscriber_type, subscriber_id, grove_id);
 `
 
 // Helper functions for JSON marshaling/unmarshaling

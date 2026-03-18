@@ -514,16 +514,23 @@ const (
 	SubscriberTypeUser  = "user"
 )
 
+// SubscriptionScope constants define what a subscription targets.
+const (
+	SubscriptionScopeAgent = "agent" // Watch a specific agent
+	SubscriptionScopeGrove = "grove" // Watch all agents in a grove
+)
+
 // NotificationSubscription represents a subscription to agent activity changes.
 type NotificationSubscription struct {
-	ID              string   `json:"id"`               // UUID primary key
-	AgentID         string   `json:"agentId"`          // Agent being watched
-	SubscriberType  string   `json:"subscriberType"`   // "agent" or "user"
-	SubscriberID    string   `json:"subscriberId"`     // Slug or ID of the subscriber
-	GroveID         string   `json:"groveId"`          // Grove scope
+	ID                string   `json:"id"`               // UUID primary key
+	Scope             string   `json:"scope"`            // "agent" or "grove"
+	AgentID           string   `json:"agentId,omitempty"` // Required when Scope="agent", empty when Scope="grove"
+	SubscriberType    string   `json:"subscriberType"`   // "agent" or "user"
+	SubscriberID      string   `json:"subscriberId"`     // Slug or ID of the subscriber
+	GroveID           string   `json:"groveId"`          // Always required (grove context)
 	TriggerActivities []string `json:"triggerActivities"` // e.g. ["COMPLETED", "WAITING_FOR_INPUT"]
-	CreatedAt       time.Time `json:"createdAt"`
-	CreatedBy       string   `json:"createdBy"`
+	CreatedAt         time.Time `json:"createdAt"`
+	CreatedBy         string   `json:"createdBy"`
 }
 
 // MatchesActivity returns true if the given activity matches any of the subscription's

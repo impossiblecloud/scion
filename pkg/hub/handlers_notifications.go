@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/store"
 )
 
@@ -83,6 +84,9 @@ type agentNotificationsResponse struct {
 // Routes:
 //   - POST /api/v1/notifications/ack-all: Acknowledge all notifications
 //   - POST /api/v1/notifications/{id}/ack: Acknowledge a single notification
+//   - POST /api/v1/notifications/subscriptions: Create a subscription
+//   - GET  /api/v1/notifications/subscriptions: List subscriptions for caller
+//   - DELETE /api/v1/notifications/subscriptions/{id}: Delete a subscription
 func (s *Server) handleNotificationRoutes(w http.ResponseWriter, r *http.Request) {
 	user := GetUserIdentityFromContext(r.Context())
 	if user == nil {
@@ -103,6 +107,12 @@ func (s *Server) handleNotificationRoutes(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Subscription routes: /api/v1/notifications/subscriptions[/...]
+	if id == "subscriptions" {
+		s.handleSubscriptionRoutes(w, r, user, action)
+		return
+	}
+
 	// POST /api/v1/notifications/{id}/ack
 	if id != "" && action == "ack" && r.Method == http.MethodPost {
 		if err := s.store.AcknowledgeNotification(r.Context(), id); err != nil {
@@ -120,4 +130,137 @@ func (s *Server) handleNotificationRoutes(w http.ResponseWriter, r *http.Request
 	}
 
 	MethodNotAllowed(w)
+}
+
+// createSubscriptionRequest is the request body for POST /api/v1/notifications/subscriptions.
+type createSubscriptionRequest struct {
+	Scope             string   `json:"scope"`
+	AgentID           string   `json:"agentId,omitempty"`
+	GroveID           string   `json:"groveId"`
+	TriggerActivities []string `json:"triggerActivities"`
+}
+
+// handleSubscriptionRoutes handles CRUD for notification subscriptions.
+func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request, user UserIdentity, subID string) {
+	ctx := r.Context()
+
+	switch {
+	// POST /api/v1/notifications/subscriptions — Create
+	case subID == "" && r.Method == http.MethodPost:
+		var req createSubscriptionRequest
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body", nil)
+			return
+		}
+
+		// Validate scope
+		if req.Scope != store.SubscriptionScopeAgent && req.Scope != store.SubscriptionScopeGrove {
+			writeError(w, http.StatusBadRequest, "bad_request", "scope must be 'agent' or 'grove'", nil)
+			return
+		}
+		if req.Scope == store.SubscriptionScopeAgent && req.AgentID == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "agentId is required when scope is 'agent'", nil)
+			return
+		}
+		if req.Scope == store.SubscriptionScopeGrove && req.AgentID != "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "agentId must be empty when scope is 'grove'", nil)
+			return
+		}
+		if req.GroveID == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "groveId is required", nil)
+			return
+		}
+		if len(req.TriggerActivities) == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "triggerActivities must be non-empty", nil)
+			return
+		}
+
+		sub := &store.NotificationSubscription{
+			ID:                api.NewUUID(),
+			Scope:             req.Scope,
+			AgentID:           req.AgentID,
+			SubscriberType:    store.SubscriberTypeUser,
+			SubscriberID:      user.ID(),
+			GroveID:           req.GroveID,
+			TriggerActivities: req.TriggerActivities,
+			CreatedBy:         user.ID(),
+		}
+
+		if err := s.store.CreateNotificationSubscription(ctx, sub); err != nil {
+			if err == store.ErrAlreadyExists {
+				// Idempotent: return existing subscription
+				existing, listErr := s.store.GetSubscriptionsForSubscriber(ctx, store.SubscriberTypeUser, user.ID())
+				if listErr == nil {
+					for _, e := range existing {
+						if e.Scope == req.Scope && e.AgentID == req.AgentID && e.GroveID == req.GroveID {
+							writeJSON(w, http.StatusOK, e)
+							return
+						}
+					}
+				}
+				writeJSON(w, http.StatusOK, sub)
+				return
+			}
+			writeErrorFromErr(w, err, "")
+			return
+		}
+
+		slog.Info("Subscription created",
+			"subscriptionID", sub.ID, "scope", sub.Scope, "userID", user.ID())
+		writeJSON(w, http.StatusCreated, sub)
+
+	// GET /api/v1/notifications/subscriptions — List
+	case subID == "" && r.Method == http.MethodGet:
+		subs, err := s.store.GetSubscriptionsForSubscriber(ctx, store.SubscriberTypeUser, user.ID())
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+
+		// Apply optional filters
+		groveID := r.URL.Query().Get("groveId")
+		agentID := r.URL.Query().Get("agentId")
+		scope := r.URL.Query().Get("scope")
+
+		var filtered []store.NotificationSubscription
+		for _, sub := range subs {
+			if groveID != "" && sub.GroveID != groveID {
+				continue
+			}
+			if agentID != "" && sub.AgentID != agentID {
+				continue
+			}
+			if scope != "" && sub.Scope != scope {
+				continue
+			}
+			filtered = append(filtered, sub)
+		}
+
+		writeJSON(w, http.StatusOK, filtered)
+
+	// DELETE /api/v1/notifications/subscriptions/{id} — Delete
+	case subID != "" && r.Method == http.MethodDelete:
+		// Verify ownership before deleting
+		sub, err := s.store.GetNotificationSubscription(ctx, subID)
+		if err != nil {
+			writeErrorFromErr(w, err, "Subscription")
+			return
+		}
+		if sub.SubscriberType != store.SubscriberTypeUser || sub.SubscriberID != user.ID() {
+			Forbidden(w)
+			return
+		}
+
+		if err := s.store.DeleteNotificationSubscription(ctx, subID); err != nil {
+			writeErrorFromErr(w, err, "Subscription")
+			return
+		}
+
+		slog.Info("Subscription deleted",
+			"subscriptionID", subID, "userID", user.ID())
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		MethodNotAllowed(w)
+	}
 }

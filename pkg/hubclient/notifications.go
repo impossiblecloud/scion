@@ -97,3 +97,95 @@ func (s *notificationService) AcknowledgeAll(ctx context.Context) error {
 	}
 	return apiclient.CheckResponse(resp)
 }
+
+// SubscriptionService handles notification subscription operations.
+type SubscriptionService interface {
+	// Create creates a new notification subscription.
+	Create(ctx context.Context, req *CreateSubscriptionRequest) (*Subscription, error)
+
+	// List returns subscriptions for the current user.
+	List(ctx context.Context, opts *ListSubscriptionsOptions) ([]Subscription, error)
+
+	// Delete removes a subscription by ID.
+	Delete(ctx context.Context, id string) error
+}
+
+// subscriptionService is the implementation of SubscriptionService.
+type subscriptionService struct {
+	c *client
+}
+
+// CreateSubscriptionRequest is the request body for creating a subscription.
+type CreateSubscriptionRequest struct {
+	Scope             string   `json:"scope"`
+	AgentID           string   `json:"agentId,omitempty"`
+	GroveID           string   `json:"groveId"`
+	TriggerActivities []string `json:"triggerActivities"`
+}
+
+// ListSubscriptionsOptions configures subscription listing.
+type ListSubscriptionsOptions struct {
+	GroveID string
+	AgentID string
+	Scope   string
+}
+
+// Subscription represents a notification subscription from the Hub API.
+type Subscription struct {
+	ID                string    `json:"id"`
+	Scope             string    `json:"scope"`
+	AgentID           string    `json:"agentId,omitempty"`
+	SubscriberType    string    `json:"subscriberType"`
+	SubscriberID      string    `json:"subscriberId"`
+	GroveID           string    `json:"groveId"`
+	TriggerActivities []string  `json:"triggerActivities"`
+	CreatedAt         time.Time `json:"createdAt"`
+	CreatedBy         string    `json:"createdBy"`
+}
+
+// Create creates a new notification subscription.
+func (s *subscriptionService) Create(ctx context.Context, req *CreateSubscriptionRequest) (*Subscription, error) {
+	resp, err := s.c.transport.Post(ctx, "/api/v1/notifications/subscriptions", req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[Subscription](resp)
+}
+
+// List returns subscriptions for the current user.
+func (s *subscriptionService) List(ctx context.Context, opts *ListSubscriptionsOptions) ([]Subscription, error) {
+	query := url.Values{}
+	if opts != nil {
+		if opts.GroveID != "" {
+			query.Set("groveId", opts.GroveID)
+		}
+		if opts.AgentID != "" {
+			query.Set("agentId", opts.AgentID)
+		}
+		if opts.Scope != "" {
+			query.Set("scope", opts.Scope)
+		}
+	}
+
+	resp, err := s.c.transport.GetWithQuery(ctx, "/api/v1/notifications/subscriptions", query, nil)
+	if err != nil {
+		return nil, err
+	}
+	result, err := apiclient.DecodeResponse[[]Subscription](resp)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return []Subscription{}, nil
+	}
+	return *result, nil
+}
+
+// Delete removes a subscription by ID.
+func (s *subscriptionService) Delete(ctx context.Context, id string) error {
+	resp, err := s.c.transport.Delete(ctx, "/api/v1/notifications/subscriptions/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	return apiclient.CheckResponse(resp)
+}

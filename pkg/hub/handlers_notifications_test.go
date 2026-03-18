@@ -60,6 +60,7 @@ func setupNotificationHandlerTest(t *testing.T) (*Server, store.Store, string) {
 
 	sub := &store.NotificationSubscription{
 		ID:              api.NewUUID(),
+		Scope:           store.SubscriptionScopeAgent,
 		AgentID:         agent.ID,
 		SubscriberType:  store.SubscriberTypeUser,
 		SubscriberID:    userID,
@@ -241,6 +242,7 @@ func TestHandleNotifications_FilterByAgent(t *testing.T) {
 	// Create subscription: agent-watched subscribes to agent-other
 	sub2 := &store.NotificationSubscription{
 		ID:                api.NewUUID(),
+		Scope:             store.SubscriptionScopeAgent,
 		AgentID:           "agent-other",
 		SubscriberType:    store.SubscriberTypeAgent,
 		SubscriberID:      "agent-watched",
@@ -403,4 +405,138 @@ func TestCreateGroveAgent_NoNotifyNoSubscription(t *testing.T) {
 	subs, err := s.GetNotificationSubscriptions(ctx, resp.Agent.ID)
 	require.NoError(t, err)
 	assert.Empty(t, subs, "expected no notification subscriptions when notify is false")
+}
+
+// =============================================================================
+// Subscription CRUD Endpoint Tests
+// =============================================================================
+
+func TestHandleSubscriptions_CreateAgentScoped(t *testing.T) {
+	srv, s, _ := setupNotificationHandlerTest(t)
+
+	req := createSubscriptionRequest{
+		Scope:             "agent",
+		AgentID:           "agent-watched",
+		GroveID:           "grove-notif-handler",
+		TriggerActivities: []string{"COMPLETED", "WAITING_FOR_INPUT"},
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/notifications/subscriptions", req)
+
+	// May be 201 (new) or 200 (idempotent — same subscriber already exists from setup)
+	assert.True(t, rec.Code == http.StatusCreated || rec.Code == http.StatusOK,
+		"expected 201 or 200, got %d: %s", rec.Code, rec.Body.String())
+
+	var sub store.NotificationSubscription
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&sub))
+	assert.Equal(t, "agent", sub.Scope)
+	assert.Equal(t, "agent-watched", sub.AgentID)
+	assert.Equal(t, "grove-notif-handler", sub.GroveID)
+
+	// Verify in store
+	subs, err := s.GetSubscriptionsForSubscriber(context.Background(), store.SubscriberTypeUser, DevUserID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, subs)
+}
+
+func TestHandleSubscriptions_CreateGroveScoped(t *testing.T) {
+	srv, _, _ := setupNotificationHandlerTest(t)
+
+	req := createSubscriptionRequest{
+		Scope:             "grove",
+		GroveID:           "grove-notif-handler",
+		TriggerActivities: []string{"COMPLETED"},
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/notifications/subscriptions", req)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var sub store.NotificationSubscription
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&sub))
+	assert.Equal(t, "grove", sub.Scope)
+	assert.Empty(t, sub.AgentID)
+	assert.Equal(t, "grove-notif-handler", sub.GroveID)
+}
+
+func TestHandleSubscriptions_CreateValidation(t *testing.T) {
+	srv, _, _ := setupNotificationHandlerTest(t)
+
+	tests := []struct {
+		name string
+		req  createSubscriptionRequest
+	}{
+		{"invalid scope", createSubscriptionRequest{Scope: "bad", GroveID: "g", TriggerActivities: []string{"COMPLETED"}}},
+		{"agent scope no agentId", createSubscriptionRequest{Scope: "agent", GroveID: "g", TriggerActivities: []string{"COMPLETED"}}},
+		{"grove scope with agentId", createSubscriptionRequest{Scope: "grove", AgentID: "a", GroveID: "g", TriggerActivities: []string{"COMPLETED"}}},
+		{"no groveId", createSubscriptionRequest{Scope: "agent", AgentID: "a", TriggerActivities: []string{"COMPLETED"}}},
+		{"no triggers", createSubscriptionRequest{Scope: "agent", AgentID: "a", GroveID: "g"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doRequest(t, srv, http.MethodPost, "/api/v1/notifications/subscriptions", tt.req)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
+func TestHandleSubscriptions_List(t *testing.T) {
+	srv, _, _ := setupNotificationHandlerTest(t)
+
+	// Create a grove-scoped subscription
+	createReq := createSubscriptionRequest{
+		Scope:             "grove",
+		GroveID:           "grove-notif-handler",
+		TriggerActivities: []string{"COMPLETED"},
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/notifications/subscriptions", createReq)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// List all subscriptions
+	rec = doRequest(t, srv, http.MethodGet, "/api/v1/notifications/subscriptions", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var subs []store.NotificationSubscription
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&subs))
+	// At least 2: one from setup (agent-scoped) + one we just created (grove-scoped)
+	assert.GreaterOrEqual(t, len(subs), 2)
+
+	// Filter by scope
+	rec = doRequest(t, srv, http.MethodGet, "/api/v1/notifications/subscriptions?scope=grove", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var groveSubs []store.NotificationSubscription
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&groveSubs))
+	assert.Len(t, groveSubs, 1)
+	assert.Equal(t, "grove", groveSubs[0].Scope)
+}
+
+func TestHandleSubscriptions_Delete(t *testing.T) {
+	srv, s, _ := setupNotificationHandlerTest(t)
+	ctx := context.Background()
+
+	// Create a new subscription to delete
+	createReq := createSubscriptionRequest{
+		Scope:             "grove",
+		GroveID:           "grove-notif-handler",
+		TriggerActivities: []string{"COMPLETED"},
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/notifications/subscriptions", createReq)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var sub store.NotificationSubscription
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&sub))
+	require.NotEmpty(t, sub.ID)
+
+	// Delete it
+	rec = doRequest(t, srv, http.MethodDelete, "/api/v1/notifications/subscriptions/"+sub.ID, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify deleted
+	_, err := s.GetNotificationSubscription(ctx, sub.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestHandleSubscriptions_DeleteNotFound(t *testing.T) {
+	srv, _, _ := setupNotificationHandlerTest(t)
+
+	rec := doRequest(t, srv, http.MethodDelete, "/api/v1/notifications/subscriptions/nonexistent-id", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

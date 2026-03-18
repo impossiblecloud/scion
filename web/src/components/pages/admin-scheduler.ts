@@ -69,6 +69,9 @@ export class ScionPageAdminScheduler extends LitElement {
   @state()
   private error: string | null = null;
 
+  @state()
+  private cancellingId: string | null = null;
+
   static override styles = css`
     :host {
       display: block;
@@ -420,6 +423,27 @@ export class ScionPageAdminScheduler extends LitElement {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   }
 
+  private async handleCancelEvent(evt: ScheduledEvent): Promise<void> {
+    this.cancellingId = evt.id;
+    try {
+      const response = await apiFetch(
+        `/api/v1/groves/${encodeURIComponent(evt.groveId)}/scheduled-events/${encodeURIComponent(evt.id)}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errorData.message || `HTTP ${response.status}`);
+      }
+      // Reload data to reflect the cancellation
+      await this.loadSchedulerStatus();
+    } catch (err) {
+      console.error('Failed to cancel event:', err);
+      this.error = err instanceof Error ? err.message : 'Failed to cancel event';
+    } finally {
+      this.cancellingId = null;
+    }
+  }
+
   override render() {
     return html`
       <div class="header">
@@ -588,6 +612,7 @@ export class ScionPageAdminScheduler extends LitElement {
                       <th class="hide-mobile">Grove</th>
                       <th class="hide-mobile">Created</th>
                       <th class="hide-mobile">Error</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -602,6 +627,7 @@ export class ScionPageAdminScheduler extends LitElement {
 
   private renderEventRow(evt: ScheduledEvent) {
     const isPending = evt.status === 'pending';
+    const isCancelling = this.cancellingId === evt.id;
     const fireTimeDisplay = isPending
       ? this.formatFutureTime(evt.fireAt)
       : this.formatRelativeTime(evt.firedAt ?? evt.fireAt);
@@ -623,6 +649,18 @@ export class ScionPageAdminScheduler extends LitElement {
           ${evt.error
             ? html`<span class="error-text" title=${evt.error}>${evt.error}</span>`
             : html`<span class="meta-text">-</span>`}
+        </td>
+        <td>
+          ${isPending
+            ? html`
+                <sl-icon-button
+                  name="x-circle"
+                  label="Cancel event"
+                  ?disabled=${isCancelling}
+                  @click=${() => this.handleCancelEvent(evt)}
+                ></sl-icon-button>
+              `
+            : nothing}
         </td>
       </tr>
     `;

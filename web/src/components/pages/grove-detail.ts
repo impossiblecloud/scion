@@ -31,6 +31,7 @@ import { stateManager } from '../../client/state.js';
 import type { ViewMode } from '../shared/view-toggle.js';
 import '../shared/status-badge.js';
 import '../shared/view-toggle.js';
+import '../shared/scheduled-event-list.js';
 
 @customElement('scion-page-grove-detail')
 export class ScionPageGroveDetail extends LitElement {
@@ -1152,6 +1153,11 @@ export class ScionPageGroveDetail extends LitElement {
       </div>
 
       ${!this.grove.gitRemote ? this.renderWorkspaceFiles() : ''}
+
+      <scion-scheduled-event-list
+        .groveId=${this.grove.id}
+        compact
+      ></scion-scheduled-event-list>
 
       <div class="section-header">
         <h2>Agents</h2>

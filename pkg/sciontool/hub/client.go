@@ -501,6 +501,210 @@ func (c *Client) GetToken() string {
 	return c.token
 }
 
+// Environment variable and file path constants for GitHub App token refresh.
+const (
+	// EnvGitHubAppEnabled indicates whether GitHub App token refresh is active.
+	EnvGitHubAppEnabled = "SCION_GITHUB_APP_ENABLED"
+	// EnvGitHubTokenExpiry is the ISO 8601 expiry time of the initial GitHub token.
+	EnvGitHubTokenExpiry = "SCION_GITHUB_TOKEN_EXPIRY"
+	// EnvGitHubTokenPath is the path to the refreshable GitHub token file.
+	EnvGitHubTokenPath = "SCION_GITHUB_TOKEN_PATH"
+	// DefaultGitHubTokenPath is the default path for the GitHub token file.
+	DefaultGitHubTokenPath = "/tmp/.github-token"
+)
+
+// GitHubTokenRefreshResponse is the response from the GitHub token refresh endpoint.
+type GitHubTokenRefreshResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// RefreshGitHubToken calls the Hub to mint a fresh GitHub App installation token.
+// Returns the new token, its expiry time, and any error.
+func (c *Client) RefreshGitHubToken(ctx context.Context) (string, time.Time, error) {
+	if !c.IsConfigured() {
+		return "", time.Time{}, fmt.Errorf("hub client not configured")
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/refresh-token",
+		strings.TrimSuffix(c.hubURL, "/"), c.agentID)
+
+	// Read current Hub auth token under lock
+	c.tokenMu.RLock()
+	currentToken := c.token
+	c.tokenMu.RUnlock()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("X-Scion-Agent-Token", currentToken)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("GitHub token refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("GitHub token refresh failed with status %d: %s",
+			resp.StatusCode, string(respBody))
+	}
+
+	var result GitHubTokenRefreshResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to parse GitHub token refresh response: %w", err)
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, result.ExpiresAt)
+	if err != nil {
+		// Try ISO 8601 format without timezone name
+		expiresAt, err = time.Parse("2006-01-02T15:04:05Z", result.ExpiresAt)
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("failed to parse GitHub token expiry: %w", err)
+		}
+	}
+
+	return result.Token, expiresAt, nil
+}
+
+// GitHubTokenRefreshConfig configures the GitHub token refresh loop.
+type GitHubTokenRefreshConfig struct {
+	// RefreshAt is the time at which the first refresh should occur.
+	RefreshAt time.Time
+	// TokenPath is the file path to write the refreshed token to.
+	TokenPath string
+	// Timeout is the context timeout for each refresh request.
+	Timeout time.Duration
+	// OnRefreshed is called when the token is successfully refreshed.
+	OnRefreshed func(newToken string, newExpiry time.Time)
+	// OnError is called when a refresh attempt fails.
+	OnError func(error)
+}
+
+// DefaultGitHubTokenRefreshTimeout is the default timeout for GitHub token refresh requests.
+const DefaultGitHubTokenRefreshTimeout = 30 * time.Second
+
+// StartGitHubTokenRefresh starts a background goroutine that proactively refreshes
+// the GitHub App installation token before it expires. The fresh token is written
+// to the token file at config.TokenPath so non-git consumers (gh CLI, custom scripts)
+// always have a valid token. The GITHUB_TOKEN env var is also updated in-process.
+// Returns a channel that is closed when the loop exits.
+func (c *Client) StartGitHubTokenRefresh(ctx context.Context, config *GitHubTokenRefreshConfig) <-chan struct{} {
+	done := make(chan struct{})
+
+	timeout := DefaultGitHubTokenRefreshTimeout
+	if config != nil && config.Timeout > 0 {
+		timeout = config.Timeout
+	}
+
+	go func() {
+		defer close(done)
+
+		refreshAt := config.RefreshAt
+		for {
+			now := time.Now()
+			delay := refreshAt.Sub(now)
+			if delay <= 0 {
+				delay = 0
+			}
+
+			timer := time.NewTimer(delay)
+
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+
+			refreshCtx, cancel := context.WithTimeout(ctx, timeout)
+			newToken, newExpiry, err := c.RefreshGitHubToken(refreshCtx)
+			cancel()
+
+			if err != nil {
+				if config != nil && config.OnError != nil {
+					config.OnError(err)
+				}
+				// Retry in 30 seconds
+				refreshAt = time.Now().Add(30 * time.Second)
+				continue
+			}
+
+			// Write the fresh token to the token file
+			if config.TokenPath != "" {
+				if writeErr := WriteGitHubTokenFile(config.TokenPath, newToken); writeErr != nil {
+					if config.OnError != nil {
+						config.OnError(fmt.Errorf("failed to write GitHub token file: %w", writeErr))
+					}
+				}
+			}
+
+			// Update GITHUB_TOKEN env var in-process
+			os.Setenv("GITHUB_TOKEN", newToken)
+
+			if config != nil && config.OnRefreshed != nil {
+				config.OnRefreshed(newToken, newExpiry)
+			}
+
+			// Schedule next refresh: 10 minutes before expiry (tokens last 1 hour)
+			refreshAt = newExpiry.Add(-10 * time.Minute)
+			if refreshAt.Before(time.Now()) {
+				// Token duration is very short; refresh in 1 minute
+				refreshAt = time.Now().Add(1 * time.Minute)
+			}
+		}
+	}()
+
+	return done
+}
+
+// WriteGitHubTokenFile writes a GitHub token to the specified path atomically.
+func WriteGitHubTokenFile(path, token string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create token file directory: %w", err)
+	}
+
+	// Write to temp file then rename for atomicity
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to write GitHub token file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("failed to rename GitHub token file: %w", err)
+	}
+	return nil
+}
+
+// ReadGitHubTokenFile reads a GitHub token from the specified path.
+// Returns empty string if the file doesn't exist or can't be read.
+func ReadGitHubTokenFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// GitHubTokenPath returns the configured GitHub token file path from env,
+// falling back to the default path.
+func GitHubTokenPath() string {
+	if p := os.Getenv(EnvGitHubTokenPath); p != "" {
+		return p
+	}
+	return DefaultGitHubTokenPath
+}
+
+// IsGitHubAppEnabled returns true if GitHub App token refresh is active.
+func IsGitHubAppEnabled() bool {
+	return os.Getenv(EnvGitHubAppEnabled) == "true"
+}
+
 // ParseTokenExpiry extracts the expiry time from a JWT token without
 // validating the signature. This is safe for scheduling purposes since
 // the Hub will validate the token on each request.

@@ -17,9 +17,12 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -331,5 +334,183 @@ func TestHandleGroveGitHubPermissions(t *testing.T) {
 	}
 	if clearedGrove.GitHubPermissions != nil {
 		t.Error("expected nil permissions after reset")
+	}
+}
+
+// ============================================================================
+// GitHub App Token Refresh Endpoint (Phase 3)
+// ============================================================================
+
+// doRequestWithAgentTokenGH performs an HTTP request with an agent JWT token.
+func doRequestWithAgentTokenGH(t *testing.T, srv *Server, method, path string, body interface{}, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to marshal body: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Scion-Agent-Token", token)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestHandleAgentGitHubTokenRefresh_NoAuth(t *testing.T) {
+	srv, _ := testServer(t)
+	ctx := context.Background()
+
+	// Create a grove and agent
+	grove := &store.Grove{
+		ID:   "grove_gh_refresh",
+		Name: "Test Grove",
+		Slug: "test-grove",
+	}
+	if err := srv.store.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:      "agent_gh_refresh",
+		Name:    "test-agent",
+		Slug:    "test-agent",
+		GroveID: grove.ID,
+	}
+	if err := srv.store.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	// Request without any auth should fail with 401
+	rec := doRequestNoAuth(t, srv, http.MethodPost,
+		"/api/v1/agents/agent_gh_refresh/refresh-token", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleAgentGitHubTokenRefresh_DevAuth(t *testing.T) {
+	srv, _ := testServer(t)
+	ctx := context.Background()
+
+	// Create a grove and agent
+	grove := &store.Grove{
+		ID:   "grove_gh_refresh2",
+		Name: "Test Grove 2",
+		Slug: "test-grove-2",
+	}
+	if err := srv.store.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:      "agent_gh_refresh2",
+		Name:    "test-agent-2",
+		Slug:    "test-agent-2",
+		GroveID: grove.ID,
+	}
+	if err := srv.store.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	// Dev auth creates a user identity, not an agent identity — should fail with 401
+	rec := doRequest(t, srv, http.MethodPost,
+		"/api/v1/agents/agent_gh_refresh2/refresh-token", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 (needs agent auth, not user auth), got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleAgentGitHubTokenRefresh_SelfAccess(t *testing.T) {
+	srv, _ := testServer(t)
+	ctx := context.Background()
+
+	// Create a grove and agent
+	grove := &store.Grove{
+		ID:   "grove_gh_refresh3",
+		Name: "Test Grove 3",
+		Slug: "test-grove-3",
+	}
+	if err := srv.store.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:      "agent_gh_refresh3",
+		Name:    "test-agent-3",
+		Slug:    "test-agent-3",
+		GroveID: grove.ID,
+	}
+	if err := srv.store.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	if srv.agentTokenService == nil {
+		t.Skip("agent token service not available")
+	}
+
+	// Generate an agent token with refresh scope
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(
+		"agent_gh_refresh3", grove.ID,
+		[]AgentTokenScope{ScopeAgentTokenRefresh})
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	// Agent trying to refresh another agent's token should fail
+	rec := doRequestWithAgentTokenGH(t, srv, http.MethodPost,
+		"/api/v1/agents/some_other_agent/refresh-token", nil, agentToken)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 (wrong agent), got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleAgentGitHubTokenRefresh_NoInstallation(t *testing.T) {
+	srv, _ := testServer(t)
+	ctx := context.Background()
+
+	// Create a grove WITHOUT a GitHub App installation
+	grove := &store.Grove{
+		ID:   "grove_gh_refresh4",
+		Name: "Test Grove 4",
+		Slug: "test-grove-4",
+	}
+	if err := srv.store.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:      "agent_gh_refresh4",
+		Name:    "test-agent-4",
+		Slug:    "test-agent-4",
+		GroveID: grove.ID,
+	}
+	if err := srv.store.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	if srv.agentTokenService == nil {
+		t.Skip("agent token service not available")
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(
+		"agent_gh_refresh4", grove.ID,
+		[]AgentTokenScope{ScopeAgentTokenRefresh})
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	// Request should fail because grove has no GitHub App installation
+	rec := doRequestWithAgentTokenGH(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/agents/%s/refresh-token", agent.ID), nil, agentToken)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 (no installation), got %d: %s", rec.Code, rec.Body.String())
 	}
 }

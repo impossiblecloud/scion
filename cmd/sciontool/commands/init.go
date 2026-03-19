@@ -331,6 +331,8 @@ func runInit(args []string) int {
 	var heartbeatDone <-chan struct{}
 	var tokenRefreshCancel context.CancelFunc
 	var tokenRefreshDone <-chan struct{}
+	var ghTokenRefreshCancel context.CancelFunc
+	var ghTokenRefreshDone <-chan struct{}
 
 	// Wait a moment for process to start, then run post-start hooks
 	// Use a short timeout to detect immediate startup failures
@@ -438,6 +440,65 @@ func runInit(args []string) int {
 		} else {
 			log.Debug("Hub client not configured - skipping status report")
 		}
+
+		// Start GitHub App token refresh loop if enabled
+		if hub.IsGitHubAppEnabled() && hubClient != nil && hubClient.IsConfigured() {
+			tokenPath := hub.GitHubTokenPath()
+
+			// Write the initial token to the token file so consumers can read it
+			initialToken := os.Getenv("GITHUB_TOKEN")
+			if initialToken != "" {
+				if err := hub.WriteGitHubTokenFile(tokenPath, initialToken); err != nil {
+					log.Error("Failed to write initial GitHub token file: %v", err)
+				} else {
+					log.Info("Wrote initial GitHub token to %s", tokenPath)
+				}
+			}
+
+			// Parse initial token expiry to schedule first refresh
+			expiryStr := os.Getenv(hub.EnvGitHubTokenExpiry)
+			if expiryStr != "" {
+				ghTokenExpiry, err := time.Parse("2006-01-02T15:04:05Z", expiryStr)
+				if err != nil {
+					ghTokenExpiry, err = time.Parse(time.RFC3339, expiryStr)
+				}
+				if err != nil {
+					log.Error("Failed to parse GitHub token expiry %q: %v", expiryStr, err)
+				} else {
+					// Schedule first refresh 10 minutes before expiry (tokens last 1 hour)
+					ghRefreshAt := ghTokenExpiry.Add(-10 * time.Minute)
+					if ghRefreshAt.Before(time.Now()) {
+						if time.Now().Before(ghTokenExpiry) {
+							ghRefreshAt = time.Now()
+							log.Info("GitHub token within refresh window, refreshing immediately (expires: %s)", ghTokenExpiry.Format(time.RFC3339))
+						} else {
+							log.Error("GitHub token already expired at %s", ghTokenExpiry.Format(time.RFC3339))
+							ghRefreshAt = time.Time{}
+						}
+					} else {
+						log.Info("GitHub token refresh scheduled at %s (expires: %s)",
+							ghRefreshAt.Format(time.RFC3339), ghTokenExpiry.Format(time.RFC3339))
+					}
+
+					if !ghRefreshAt.IsZero() {
+						var ghTokenRefreshCtx context.Context
+						ghTokenRefreshCtx, ghTokenRefreshCancel = context.WithCancel(context.Background())
+						ghTokenRefreshDone = hubClient.StartGitHubTokenRefresh(ghTokenRefreshCtx, &hub.GitHubTokenRefreshConfig{
+							RefreshAt: ghRefreshAt,
+							TokenPath: tokenPath,
+							OnRefreshed: func(newToken string, newExpiry time.Time) {
+								log.Info("GitHub token refreshed, new expiry: %s", newExpiry.Format(time.RFC3339))
+							},
+							OnError: func(err error) {
+								log.Error("GitHub token refresh failed: %v", err)
+							},
+						})
+					}
+				}
+			} else {
+				log.Debug("No GitHub token expiry set, skipping GitHub token refresh loop")
+			}
+		}
 	}
 
 	// Set up SIGUSR1 handler for limits-exceeded signaling from hook processes.
@@ -522,7 +583,12 @@ func runInit(args []string) int {
 		result = <-exitChan
 	}
 
-	// Stop token refresh and heartbeat before reporting shutdown status to prevent races
+	// Stop token refresh loops and heartbeat before reporting shutdown status to prevent races
+	if ghTokenRefreshCancel != nil {
+		ghTokenRefreshCancel()
+		<-ghTokenRefreshDone
+		log.Debug("GitHub token refresh loop stopped")
+	}
 	if tokenRefreshCancel != nil {
 		tokenRefreshCancel()
 		<-tokenRefreshDone
@@ -532,6 +598,16 @@ func runInit(args []string) int {
 		heartbeatCancel()
 		<-heartbeatDone
 		log.Debug("Heartbeat loop stopped")
+	}
+
+	// Clean up the GitHub token file on exit
+	if hub.IsGitHubAppEnabled() {
+		tokenPath := hub.GitHubTokenPath()
+		if err := os.Remove(tokenPath); err != nil && !os.IsNotExist(err) {
+			log.Error("Failed to clean up GitHub token file: %v", err)
+		} else {
+			log.Debug("Cleaned up GitHub token file: %s", tokenPath)
+		}
 	}
 
 	// Report shutting down to Hub if in hosted mode
@@ -952,8 +1028,20 @@ func gitCloneWorkspace(uid, gid int) error {
 		}
 	}
 
-	// Configure credential helper for subsequent push operations
-	credentialHelper := `!f() { echo "password=${GITHUB_TOKEN}"; echo "username=oauth2"; }; f`
+	// Configure credential helper for subsequent push operations.
+	// When GitHub App token refresh is enabled, the credential helper reads
+	// the token from the refreshable token file instead of the env var, so
+	// git operations always use a fresh token even after refresh.
+	var credentialHelper string
+	if os.Getenv("SCION_GITHUB_APP_ENABLED") == "true" {
+		tokenPath := os.Getenv("SCION_GITHUB_TOKEN_PATH")
+		if tokenPath == "" {
+			tokenPath = "/tmp/.github-token"
+		}
+		credentialHelper = fmt.Sprintf(`!f() { test -f "%s" && echo "password=$(cat '%s')" || echo "password=${GITHUB_TOKEN}"; echo "username=oauth2"; }; f`, tokenPath, tokenPath)
+	} else {
+		credentialHelper = `!f() { echo "password=${GITHUB_TOKEN}"; echo "username=oauth2"; }; f`
+	}
 	credCmd := exec.Command("git", "-C", workspacePath, "config", "credential.helper", credentialHelper)
 	setupGitCmd(credCmd)
 	if err := credCmd.Run(); err != nil {

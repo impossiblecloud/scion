@@ -1484,10 +1484,10 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 		return
 	}
 
-	// For actions other than "status" and "token/refresh" (self-access),
+	// For actions other than "status", "token/refresh", and "refresh-token" (self-access),
 	// we require user or agent authentication with appropriate scopes.
-	// Token refresh is handled separately with self-access enforcement.
-	if action != "status" && action != "token/refresh" {
+	// Token refresh endpoints are handled separately with self-access enforcement.
+	if action != "status" && action != "token/refresh" && action != "refresh-token" {
 		userIdent := GetUserIdentityFromContext(r.Context())
 		agentIdent := GetAgentIdentityFromContext(r.Context())
 		if userIdent == nil && agentIdent == nil {
@@ -1542,6 +1542,8 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 		s.restoreAgent(w, r, id)
 	case "token/refresh":
 		s.handleAgentTokenRefresh(w, r, id)
+	case "refresh-token":
+		s.handleAgentGitHubTokenRefresh(w, r, id)
 	default:
 		NotFound(w, "Action")
 	}
@@ -1597,6 +1599,78 @@ func (s *Server) handleAgentTokenRefresh(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"token":      newToken,
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// handleAgentGitHubTokenRefresh handles POST /api/v1/agents/{id}/refresh-token.
+// An agent can request a fresh GitHub App installation token when its current
+// token is nearing expiry. This is a self-access operation: the agent must
+// present a valid Hub auth token whose subject matches the target agent ID.
+func (s *Server) handleAgentGitHubTokenRefresh(w http.ResponseWriter, r *http.Request, id string) {
+	agentIdent := GetAgentIdentityFromContext(r.Context())
+	if agentIdent == nil {
+		writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
+			"agent authentication required for GitHub token refresh", nil)
+		return
+	}
+
+	// Enforce self-access: agents can only refresh their own GitHub token
+	if agentIdent.ID() != id {
+		writeError(w, http.StatusForbidden, ErrCodeForbidden,
+			"agents can only refresh their own GitHub token", nil)
+		return
+	}
+
+	// Require the token refresh scope
+	if !agentIdent.HasScope(ScopeAgentTokenRefresh) {
+		writeError(w, http.StatusForbidden, ErrCodeForbidden,
+			"missing required scope: agent:token:refresh", nil)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Look up the agent to get its grove
+	agent, err := s.store.GetAgent(ctx, id)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	if agent.GroveID == "" {
+		writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest,
+			"agent has no grove associated", nil)
+		return
+	}
+
+	grove, err := s.store.GetGrove(ctx, agent.GroveID)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	if grove.GitHubInstallationID == nil {
+		writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest,
+			"grove has no GitHub App installation", nil)
+		return
+	}
+
+	token, expiry, err := s.MintGitHubAppTokenForGrove(ctx, grove)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+			"failed to mint GitHub token: "+err.Error(), nil)
+		return
+	}
+
+	if token == "" {
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+			"GitHub App not configured on Hub", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token":      token,
+		"expires_at": expiry,
 	})
 }
 

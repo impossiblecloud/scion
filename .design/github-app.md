@@ -913,14 +913,16 @@ This is comparable to installing any third-party GitHub App (CI systems, code re
 10. ✅ Transparent injection as `GITHUB_TOKEN` in agent environment via `HTTPAgentDispatcher`.
 11. ✅ Unit tests: webhook signature, webhook events (ping, install created/deleted, repos added/removed), grove matching, idempotent creates.
 
-### Phase 3: Token Refresh (Blended)
+### Phase 3: Token Refresh (Blended) ✅ COMPLETE
 
-1. Add Hub API: `POST /api/v1/agents/{id}/refresh-token`.
-2. Extend `sciontool` credential helper for on-demand token refresh (git operations).
-3. Add `sciontool` background token refresh loop (gh CLI / API operations).
-4. Add `gh` wrapper script for fresh token injection.
-5. Add `SCION_GITHUB_APP_ENABLED`, `SCION_GITHUB_TOKEN_EXPIRY`, and `SCION_GITHUB_TOKEN_PATH` env vars.
-6. Test long-running agents with token refresh across git and gh CLI.
+1. ✅ Hub API: `POST /api/v1/agents/{id}/refresh-token` — mints fresh GitHub App installation token for the agent's grove. Self-access enforcement via agent JWT.
+2. ✅ `sciontool credential-helper` subcommand for on-demand git credential refresh — reads from token file, falls back to on-demand Hub refresh.
+3. ✅ `sciontool` background GitHub token refresh loop in init — proactively refreshes 10 minutes before expiry, writes to `SCION_GITHUB_TOKEN_PATH`.
+4. ✅ `sciontool gh-wrapper` subcommand — reads fresh token from token file, sets `GH_TOKEN`, execs real `gh` binary.
+5. ✅ `SCION_GITHUB_APP_ENABLED`, `SCION_GITHUB_TOKEN_EXPIRY`, and `SCION_GITHUB_TOKEN_PATH` env vars — already injected by Phase 2, now consumed by sciontool init for refresh scheduling.
+6. ✅ Git credential helper updated to read from token file when GitHub App is enabled (falls back to `GITHUB_TOKEN` env var).
+7. ✅ Token file cleanup on agent exit; initial token written to file at startup.
+8. ✅ Unit tests: Hub handler (auth, self-access, no-installation), client (RefreshGitHubToken, token file I/O, refresh loop, env helpers).
 
 ### Phase 4: Web UI, Health Monitoring, and Polish
 

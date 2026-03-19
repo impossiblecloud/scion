@@ -896,6 +896,206 @@ func TestClient_RefreshToken_ConcurrentAccess(t *testing.T) {
 	assert.NotEmpty(t, client.GetToken())
 }
 
+func TestClient_RefreshGitHubToken(t *testing.T) {
+	t.Run("successful refresh", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/agents/agent-123/refresh-token", r.URL.Path)
+			assert.Equal(t, "hub-token", r.Header.Get("X-Scion-Agent-Token"))
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token":"ghs_fresh_github_token","expires_at":"2030-01-01T01:00:00Z"}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		newToken, expiresAt, err := client.RefreshGitHubToken(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, "ghs_fresh_github_token", newToken)
+		assert.Equal(t, time.Date(2030, 1, 1, 1, 0, 0, 0, time.UTC), expiresAt)
+	})
+
+	t.Run("server rejects request", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":"no github app installation"}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		_, _, err := client.RefreshGitHubToken(context.Background())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "403")
+	})
+
+	t.Run("not configured", func(t *testing.T) {
+		client := &Client{}
+		_, _, err := client.RefreshGitHubToken(context.Background())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not configured")
+	})
+
+	t.Run("parses ISO 8601 without timezone name", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// This is the format returned by mintGitHubAppToken: "2006-01-02T15:04:05Z"
+			w.Write([]byte(`{"token":"ghs_token","expires_at":"2030-06-15T14:30:00Z"}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		_, expiresAt, err := client.RefreshGitHubToken(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, time.Date(2030, 6, 15, 14, 30, 0, 0, time.UTC), expiresAt)
+	})
+}
+
+func TestGitHubTokenFile_WriteAndRead(t *testing.T) {
+	tmpDir := t.TempDir()
+	tokenPath := tmpDir + "/github-token"
+
+	t.Run("read returns empty when no file", func(t *testing.T) {
+		token := ReadGitHubTokenFile(tokenPath)
+		assert.Equal(t, "", token)
+	})
+
+	t.Run("write and read round-trip", func(t *testing.T) {
+		err := WriteGitHubTokenFile(tokenPath, "ghs_test_token")
+		require.NoError(t, err)
+
+		token := ReadGitHubTokenFile(tokenPath)
+		assert.Equal(t, "ghs_test_token", token)
+	})
+
+	t.Run("overwrites with newer token", func(t *testing.T) {
+		err := WriteGitHubTokenFile(tokenPath, "ghs_newer_token")
+		require.NoError(t, err)
+
+		token := ReadGitHubTokenFile(tokenPath)
+		assert.Equal(t, "ghs_newer_token", token)
+	})
+}
+
+func TestIsGitHubAppEnabled(t *testing.T) {
+	orig := os.Getenv(EnvGitHubAppEnabled)
+	defer os.Setenv(EnvGitHubAppEnabled, orig)
+
+	os.Unsetenv(EnvGitHubAppEnabled)
+	assert.False(t, IsGitHubAppEnabled())
+
+	os.Setenv(EnvGitHubAppEnabled, "false")
+	assert.False(t, IsGitHubAppEnabled())
+
+	os.Setenv(EnvGitHubAppEnabled, "true")
+	assert.True(t, IsGitHubAppEnabled())
+}
+
+func TestGitHubTokenPath(t *testing.T) {
+	orig := os.Getenv(EnvGitHubTokenPath)
+	defer os.Setenv(EnvGitHubTokenPath, orig)
+
+	os.Unsetenv(EnvGitHubTokenPath)
+	assert.Equal(t, DefaultGitHubTokenPath, GitHubTokenPath())
+
+	os.Setenv(EnvGitHubTokenPath, "/custom/path/token")
+	assert.Equal(t, "/custom/path/token", GitHubTokenPath())
+}
+
+func TestClient_StartGitHubTokenRefresh(t *testing.T) {
+	t.Run("refreshes token and writes to file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tokenPath := tmpDir + "/github-token"
+
+		refreshed := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			refreshed = true
+			futureExpiry := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token":"ghs_refreshed","expires_at":"` + futureExpiry + `"}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		var receivedToken string
+		done := client.StartGitHubTokenRefresh(ctx, &GitHubTokenRefreshConfig{
+			RefreshAt: time.Now(), // Refresh immediately
+			TokenPath: tokenPath,
+			OnRefreshed: func(newToken string, newExpiry time.Time) {
+				receivedToken = newToken
+			},
+		})
+
+		<-done
+		assert.True(t, refreshed, "should have refreshed the GitHub token")
+		assert.Equal(t, "ghs_refreshed", receivedToken)
+
+		// Token file should have been written
+		fileToken := ReadGitHubTokenFile(tokenPath)
+		assert.Equal(t, "ghs_refreshed", fileToken)
+	})
+
+	t.Run("stops when context is cancelled", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token":"ghs_new","expires_at":"2030-01-01T00:00:00Z"}`))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := client.StartGitHubTokenRefresh(ctx, &GitHubTokenRefreshConfig{
+			RefreshAt: time.Now().Add(1 * time.Hour), // Far in future
+			TokenPath: "/tmp/test-token-never-written",
+		})
+
+		cancel()
+
+		select {
+		case <-done:
+			// Good
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("GitHub token refresh loop did not exit after context cancellation")
+		}
+	})
+
+	t.Run("calls error callback on failure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("server error"))
+		}))
+		defer server.Close()
+
+		client := NewClientWithConfig(server.URL, "hub-token", "agent-123")
+
+		// Use a short context — we just want to verify the error callback fires
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		errorCount := 0
+		done := client.StartGitHubTokenRefresh(ctx, &GitHubTokenRefreshConfig{
+			RefreshAt: time.Now(), // Refresh immediately
+			TokenPath: "",
+			OnError: func(err error) {
+				errorCount++
+			},
+		})
+
+		<-done
+		assert.GreaterOrEqual(t, errorCount, 1, "should have called OnError at least once")
+	})
+}
+
 func TestClient_StartHeartbeat_DefaultConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

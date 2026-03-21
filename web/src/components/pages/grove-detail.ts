@@ -97,6 +97,7 @@ export class ScionPageGroveDetail extends LitElement {
     loading: boolean;
     totalSize: number;
     error: string | null;
+    providerCount?: number;
   }> = {};
 
   /**
@@ -474,6 +475,7 @@ export class ScionPageGroveDetail extends LitElement {
     }
 
     .workspace-section {
+      margin-top: 2rem;
       margin-bottom: 2rem;
     }
 
@@ -630,6 +632,22 @@ export class ScionPageGroveDetail extends LitElement {
 
     .files-tab-group::part(body) {
       padding: 0;
+    }
+
+    .files-provider-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      font-size: 0.75rem;
+      color: var(--sl-color-warning-700, #a16207);
+      background: var(--sl-color-warning-50, #fefce8);
+      border: 1px solid var(--sl-color-warning-200, #fde68a);
+      border-radius: var(--scion-radius, 0.5rem);
+      padding: 0.25rem 0.625rem;
+    }
+
+    .files-provider-warning sl-icon {
+      font-size: 0.875rem;
     }
 
     .tab-label-truncated {
@@ -889,6 +907,7 @@ export class ScionPageGroveDetail extends LitElement {
         files: Array<{ path: string; size: number; modTime: string; mode: string }>;
         totalSize: number;
         totalCount: number;
+        providerCount?: number;
       };
 
       this.fileTabData = {
@@ -898,6 +917,7 @@ export class ScionPageGroveDetail extends LitElement {
           loading: false,
           totalSize: data.totalSize || 0,
           error: null,
+          providerCount: data.providerCount ?? 0,
         },
       };
     } catch (err) {
@@ -1332,6 +1352,16 @@ export class ScionPageGroveDetail extends LitElement {
     `;
   }
 
+  private renderProviderWarning(tabData: { providerCount?: number }) {
+    if (!tabData.providerCount || tabData.providerCount <= 1) return nothing;
+    return html`
+      <div class="files-provider-warning">
+        <sl-icon name="exclamation-triangle"></sl-icon>
+        Showing files from this server only — ${tabData.providerCount} brokers serve this grove
+      </div>
+    `;
+  }
+
   private renderFilesSection() {
     const tabs = this.getFileTabs();
     const showTabs = tabs.length > 1;
@@ -1355,6 +1385,8 @@ export class ScionPageGroveDetail extends LitElement {
               </div>`
             : nothing}
         </div>
+
+        ${this.renderProviderWarning(tabData)}
 
         ${showTabs
           ? html`

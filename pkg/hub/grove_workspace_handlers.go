@@ -53,6 +53,14 @@ type GroveWorkspaceListResponse struct {
 	TotalCount int                  `json:"totalCount"`
 }
 
+// SharedDirListResponse extends the workspace list response with provider metadata.
+type SharedDirListResponse struct {
+	Files         []GroveWorkspaceFile `json:"files"`
+	TotalSize     int64                `json:"totalSize"`
+	TotalCount    int                  `json:"totalCount"`
+	ProviderCount int                  `json:"providerCount,omitempty"`
+}
+
 // GroveWorkspaceUploadResponse is the response for uploading files to a grove workspace.
 type GroveWorkspaceUploadResponse struct {
 	Files []GroveWorkspaceFile `json:"files"`
@@ -172,6 +180,55 @@ func (s *Server) handleGroveWorkspaceList(w http.ResponseWriter, workspacePath s
 		Files:      files,
 		TotalSize:  totalSize,
 		TotalCount: len(files),
+	})
+}
+
+// handleSharedDirFileList wraps handleGroveWorkspaceList, adding provider metadata
+// to the response so the frontend can show multi-broker warnings.
+func (s *Server) handleSharedDirFileList(w http.ResponseWriter, sharedDirPath string, res *sharedDirResolution) {
+	var files []GroveWorkspaceFile
+	var totalSize int64
+
+	err := filepath.WalkDir(sharedDirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(sharedDirPath, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." || d.IsDir() {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		files = append(files, GroveWorkspaceFile{
+			Path:    relPath,
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			Mode:    info.Mode().String(),
+		})
+		totalSize += info.Size()
+		return nil
+	})
+
+	if err != nil && os.IsNotExist(err) {
+		files = []GroveWorkspaceFile{}
+	} else if err != nil {
+		InternalError(w)
+		return
+	}
+	if files == nil {
+		files = []GroveWorkspaceFile{}
+	}
+
+	writeJSON(w, http.StatusOK, SharedDirListResponse{
+		Files:         files,
+		TotalSize:     totalSize,
+		TotalCount:    len(files),
+		ProviderCount: res.ProviderCount,
 	})
 }
 
@@ -489,11 +546,12 @@ func (s *Server) handleSharedDirFiles(w http.ResponseWriter, r *http.Request, gr
 	}
 
 	// Resolve shared dir host path based on grove type
-	sharedDirPath, resolveErr := s.resolveSharedDirPath(ctx, grove, dirName)
+	resolution, resolveErr := s.resolveSharedDirPath(ctx, grove, dirName)
 	if resolveErr != nil {
 		Conflict(w, resolveErr.Error())
 		return
 	}
+	sharedDirPath := resolution.Path
 
 	// Ensure the directory exists
 	if err := os.MkdirAll(sharedDirPath, 0755); err != nil {
@@ -503,7 +561,7 @@ func (s *Server) handleSharedDirFiles(w http.ResponseWriter, r *http.Request, gr
 
 	switch {
 	case r.Method == http.MethodGet && filePath == "":
-		s.handleGroveWorkspaceList(w, sharedDirPath)
+		s.handleSharedDirFileList(w, sharedDirPath, resolution)
 	case r.Method == http.MethodGet && filePath != "":
 		s.handleGroveWorkspaceDownload(w, r, sharedDirPath, filePath)
 	case r.Method == http.MethodPost && filePath == "":
@@ -515,38 +573,73 @@ func (s *Server) handleSharedDirFiles(w http.ResponseWriter, r *http.Request, gr
 	}
 }
 
+// sharedDirResolution holds the resolved path and metadata for shared dir browsing.
+type sharedDirResolution struct {
+	Path          string
+	ProviderCount int  // total grove providers (for multi-broker warning)
+	IsLocal       bool // true when resolved via co-located broker
+}
+
 // resolveSharedDirPath resolves the host-side path for a shared directory.
 // For hub-native groves, the path is under ~/.scion/groves/<slug>/shared-dirs/<name>.
-// For git-based groves, the path is resolved via the co-located broker's local grove path.
-func (s *Server) resolveSharedDirPath(ctx context.Context, grove *store.Grove, dirName string) (string, error) {
+// For git-based groves, the path is resolved via the co-located broker's local grove path,
+// with a fallback to hub-managed storage when the broker has no local path recorded.
+func (s *Server) resolveSharedDirPath(ctx context.Context, grove *store.Grove, dirName string) (*sharedDirResolution, error) {
 	if grove.GitRemote == "" {
 		// Hub-native grove: shared dirs live under the hub-managed grove path
 		workspacePath, err := hubNativeGrovePath(grove.Slug)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve grove path")
+			return nil, fmt.Errorf("failed to resolve grove path")
 		}
-		return filepath.Join(workspacePath, "shared-dirs", dirName), nil
+		return &sharedDirResolution{
+			Path:    filepath.Join(workspacePath, "shared-dirs", dirName),
+			IsLocal: true,
+		}, nil
 	}
 
 	// Git-based grove: find the co-located broker's local path for this grove
 	providers, err := s.store.GetGroveProviders(ctx, grove.ID)
 	if err != nil {
 		slog.Warn("failed to get grove providers for shared dir browsing", "grove", grove.ID, "error", err)
-		return "", fmt.Errorf("failed to resolve grove providers")
+		return nil, fmt.Errorf("failed to resolve grove providers")
 	}
+
+	providerCount := len(providers)
+	embeddedIsProvider := false
 
 	// Find a provider on the embedded (co-located) broker
 	for _, p := range providers {
-		if s.isEmbeddedBroker(p.BrokerID) && p.LocalPath != "" {
-			sdPath, err := config.GetSharedDirPath(p.LocalPath, dirName)
-			if err != nil {
-				return "", fmt.Errorf("failed to resolve shared directory path")
+		if s.isEmbeddedBroker(p.BrokerID) {
+			embeddedIsProvider = true
+			if p.LocalPath != "" {
+				sdPath, err := config.GetSharedDirPath(p.LocalPath, dirName)
+				if err != nil {
+					return nil, fmt.Errorf("failed to resolve shared directory path")
+				}
+				return &sharedDirResolution{
+					Path:          sdPath,
+					ProviderCount: providerCount,
+					IsLocal:       true,
+				}, nil
 			}
-			return sdPath, nil
 		}
 	}
 
-	return "", fmt.Errorf("shared directory file browsing requires a co-located runtime broker")
+	// Fallback: embedded broker is a provider but has no LocalPath recorded
+	// (e.g. auto-linked). Use hub-managed storage since we share the filesystem.
+	if embeddedIsProvider {
+		workspacePath, err := hubNativeGrovePath(grove.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve grove path")
+		}
+		return &sharedDirResolution{
+			Path:          filepath.Join(workspacePath, "shared-dirs", dirName),
+			ProviderCount: providerCount,
+			IsLocal:       true,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("shared directory file browsing requires a co-located runtime broker")
 }
 
 // validateWorkspaceFilePath validates that a file path is safe for workspace operations.

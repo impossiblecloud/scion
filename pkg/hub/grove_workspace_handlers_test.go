@@ -771,6 +771,98 @@ func TestSharedDirFiles_GitGroveNoLocalBroker(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "co-located runtime broker")
 }
 
+func TestSharedDirFiles_GitGroveWithEmbeddedBroker(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := createTestGitGrove(t, srv, "SD Git Embedded", "github.com/test/sd-embedded")
+	addSharedDirToGrove(t, srv, grove.ID, "build-cache")
+
+	// Create a broker and set it as the embedded broker
+	broker := &store.RuntimeBroker{
+		ID:       "embedded-broker-001",
+		Name:     "local-broker",
+		Slug:     "local-broker",
+		Endpoint: "http://localhost:9090",
+		Status:   store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+	srv.SetEmbeddedBrokerID(broker.ID)
+
+	// Add as provider WITHOUT LocalPath (simulates auto-link)
+	provider := &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		// LocalPath intentionally empty — fallback to hub-managed path
+	}
+	require.NoError(t, s.AddGroveProvider(ctx, provider))
+
+	// Should now work via hub-managed path fallback
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/shared-dirs/build-cache/files", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp SharedDirListResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.TotalCount)
+	assert.Equal(t, 1, resp.ProviderCount)
+
+	// Clean up hub-managed grove path
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(workspacePath) })
+}
+
+func TestSharedDirFiles_GitGroveMultipleProviders(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := createTestGitGrove(t, srv, "SD Git Multi", "github.com/test/sd-multi")
+	addSharedDirToGrove(t, srv, grove.ID, "artifacts")
+
+	// Create embedded broker
+	embeddedBroker := &store.RuntimeBroker{
+		ID:       "embedded-broker-002",
+		Name:     "local-broker",
+		Slug:     "local-broker-2",
+		Endpoint: "http://localhost:9090",
+		Status:   store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, embeddedBroker))
+	srv.SetEmbeddedBrokerID(embeddedBroker.ID)
+
+	// Create a second (remote) broker
+	remoteBroker := &store.RuntimeBroker{
+		ID:       "remote-broker-001",
+		Name:     "remote-broker",
+		Slug:     "remote-broker",
+		Endpoint: "http://remote:9090",
+		Status:   store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, remoteBroker))
+
+	// Add both as providers
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: grove.ID, BrokerID: embeddedBroker.ID, BrokerName: embeddedBroker.Name,
+	}))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: grove.ID, BrokerID: remoteBroker.ID, BrokerName: remoteBroker.Name,
+	}))
+
+	// Request should succeed and report providerCount=2
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/shared-dirs/artifacts/files", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp SharedDirListResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, 2, resp.ProviderCount)
+
+	// Clean up
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(workspacePath) })
+}
+
 // Ensure the store's ErrNotFound is wired correctly for grove lookups.
 
 func init() {

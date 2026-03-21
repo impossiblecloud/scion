@@ -303,9 +303,11 @@ func (s *LocalPTYSession) runK8sExec() error {
 		Namespace(namespace).
 		SubResource("exec")
 
+	// Run as scion user: the tmux session is owned by the scion user
+	// (sciontool init drops privileges), so root can't see the session.
 	req.VersionedParams(&corev1.PodExecOptions{
 		Container: "agent",
-		Command:   []string{"tmux", "attach-session", "-t", "scion"},
+		Command:   []string{"su", "-", "scion", "-c", "tmux attach-session -t scion"},
 		Stdin:     true,
 		Stdout:    true,
 		Stderr:    true,
@@ -636,9 +638,11 @@ func (h *StreamPTYHandler) runK8sExec() error {
 		Namespace(namespace).
 		SubResource("exec")
 
+	// Run as scion user: the tmux session is owned by the scion user
+	// (sciontool init drops privileges), so root can't see the session.
 	req.VersionedParams(&corev1.PodExecOptions{
 		Container: "agent",
-		Command:   []string{"tmux", "attach-session", "-t", "scion"},
+		Command:   []string{"su", "-", "scion", "-c", "tmux attach-session -t scion"},
 		Stdin:     true,
 		Stdout:    true,
 		Stderr:    true,

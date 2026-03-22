@@ -1310,7 +1310,15 @@ export class ScionPageGroveDetail extends LitElement {
   }
 
   private handleMessagesToggle(): void {
-    if (!this.messagesExpanded) {
+    if (this.messagesExpanded) {
+      // Collapse: stop streaming and reset loaded state so next expand reloads
+      const viewer = this.shadowRoot?.querySelector(
+        'scion-agent-message-viewer'
+      ) as import('../shared/agent-message-viewer.js').ScionAgentMessageViewer | null;
+      viewer?.stopStream();
+      viewer?.resetLoaded();
+      this.messagesExpanded = false;
+    } else {
       this.messagesExpanded = true;
       this.updateComplete.then(() => {
         const viewer = this.shadowRoot?.querySelector(

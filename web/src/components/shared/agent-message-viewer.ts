@@ -520,12 +520,18 @@ export class ScionAgentMessageViewer extends LitElement {
     };
   }
 
-  private stopStream(): void {
+  /** Stop the SSE stream. Can be called by parent components (e.g. on collapse). */
+  stopStream(): void {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
     }
     this.streaming = false;
+  }
+
+  /** Reset loaded state so the next loadMessages() call will refetch. */
+  resetLoaded(): void {
+    this.loaded = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -553,12 +559,10 @@ export class ScionAgentMessageViewer extends LitElement {
       } else {
         // Agent-scoped mode
         url = `/api/v1/agents/${this.agentId}/message`;
-        body = this.composePlain
-          ? { message: text, interrupt: this.composeInterrupt }
-          : {
-              structured_message: { msg: text, plain: false },
-              interrupt: this.composeInterrupt,
-            };
+        body = {
+          structured_message: { msg: text, plain: this.composePlain },
+          interrupt: this.composeInterrupt,
+        };
       }
 
       const res = await apiFetch(url, {

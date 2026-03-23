@@ -3,12 +3,17 @@ package logparser
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+// deleteAgentURLPattern matches DELETE /agents/<name> or /v1/agents/<name> etc.
+var deleteAgentURLPattern = regexp.MustCompile(`/agents/([^/?]+)(?:\?.*)?$`)
 
 // GCPLogEntry represents a single log entry from Google Cloud Logging export.
 type GCPLogEntry struct {
@@ -18,6 +23,19 @@ type GCPLogEntry struct {
 	Severity    string            `json:"severity"`
 	Labels      map[string]string `json:"labels"`
 	LogName     string            `json:"logName"`
+	HTTPRequest *HTTPRequestField `json:"httpRequest,omitempty"`
+}
+
+// HTTPRequestField represents the httpRequest field in GCP log entries.
+type HTTPRequestField struct {
+	RequestMethod string `json:"requestMethod"`
+	RequestURL    string `json:"requestUrl"`
+}
+
+// deleteAgentRequest captures a DELETE /agents/<name> request from logs.
+type deleteAgentRequest struct {
+	agentName string
+	timestamp string
 }
 
 // PlaybackManifest is sent once at connection start.
@@ -78,9 +96,10 @@ type FileEditEvent struct {
 }
 
 type AgentLifecycleEvent struct {
-	AgentID string `json:"agentId"`
-	Name    string `json:"name"`
-	Action  string `json:"action"`
+	AgentID     string `json:"agentId"`
+	Name        string `json:"name"`
+	Action      string `json:"action"`
+	RequestedBy string `json:"requestedBy,omitempty"` // agent name that requested the destroy
 }
 
 // Agent colors assigned in order.
@@ -652,6 +671,107 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 					},
 				})
 			}
+		}
+	}
+
+	// Collect DELETE agent requests from scion_request_log entries
+	var deleteRequests []deleteAgentRequest
+	for _, e := range entries {
+		logName := logBaseName(e.LogName)
+		if !strings.HasSuffix(logName, "scion_request_log") {
+			continue
+		}
+		if e.HTTPRequest == nil || e.HTTPRequest.RequestMethod != "DELETE" {
+			continue
+		}
+		matches := deleteAgentURLPattern.FindStringSubmatch(e.HTTPRequest.RequestURL)
+		if len(matches) < 2 {
+			continue
+		}
+		agentSlug := matches[1]
+		deleteRequests = append(deleteRequests, deleteAgentRequest{
+			agentName: agentSlug,
+			timestamp: e.Timestamp,
+		})
+	}
+
+	// Post-processing: enrich agent_destroy events with requestedBy info
+	for _, delReq := range deleteRequests {
+		delTime, err := TimestampToTime(delReq.timestamp)
+		if err != nil {
+			continue
+		}
+
+		// Find the nearest agent_destroy event for this agent name (within 30 seconds)
+		bestDestroyIdx := -1
+		bestDestroyDelta := time.Duration(math.MaxInt64)
+		for i, evt := range events {
+			if evt.Type != "agent_destroy" {
+				continue
+			}
+			lifecycle, ok := evt.Data.(AgentLifecycleEvent)
+			if !ok {
+				continue
+			}
+			if lifecycle.Name != delReq.agentName {
+				continue
+			}
+			evtTime, err := TimestampToTime(evt.Timestamp)
+			if err != nil {
+				continue
+			}
+			delta := evtTime.Sub(delTime)
+			if delta < 0 {
+				delta = -delta
+			}
+			if delta <= 30*time.Second && delta < bestDestroyDelta {
+				bestDestroyDelta = delta
+				bestDestroyIdx = i
+			}
+		}
+		if bestDestroyIdx < 0 {
+			continue
+		}
+
+		// Find the nearest Bash tool-start from another agent within 15s before the DELETE request
+		var requestingAgent string
+		for i := len(events) - 1; i >= 0; i-- {
+			evt := events[i]
+			if evt.Type != "agent_state" {
+				continue
+			}
+			stateEvt, ok := evt.Data.(AgentStateEvent)
+			if !ok {
+				continue
+			}
+			if stateEvt.Activity != "executing" || stateEvt.ToolName != "Bash" {
+				continue
+			}
+			evtTime, err := TimestampToTime(evt.Timestamp)
+			if err != nil {
+				continue
+			}
+			delta := delTime.Sub(evtTime)
+			if delta < 0 || delta > 15*time.Second {
+				continue
+			}
+			// Must be a different agent than the one being destroyed
+			destroyEvt := events[bestDestroyIdx].Data.(AgentLifecycleEvent)
+			if stateEvt.AgentID == destroyEvt.AgentID {
+				continue
+			}
+			if name, ok := agentNameByID[stateEvt.AgentID]; ok {
+				requestingAgent = name
+			} else {
+				requestingAgent = stateEvt.AgentID
+			}
+			break
+		}
+
+		if requestingAgent != "" {
+			lifecycle := events[bestDestroyIdx].Data.(AgentLifecycleEvent)
+			lifecycle.RequestedBy = requestingAgent
+			events[bestDestroyIdx].Data = lifecycle
 		}
 	}
 

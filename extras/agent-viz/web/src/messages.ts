@@ -5,6 +5,10 @@ const PULSE_DURATION = 600; // ms for pulse travel
 const FADE_DURATION = 500;  // ms for line fade after pulse
 const LABEL_DURATION = 2000; // ms for content label to remain visible
 
+const BROADCAST_DURATION = 1400; // ms for ripple expansion
+const BROADCAST_FADE_START = 0.9; // start fading at 90% of expansion
+const BROADCAST_DEDUP_WINDOW = 2000; // ms window for deduplicating broadcast messages
+
 interface ActiveMessage {
   senderName: string;
   recipientName: string;
@@ -12,11 +16,19 @@ interface ActiveMessage {
   msgType: string;
   content: string;
   startTime: number;
+  broadcast: boolean;
+}
+
+/** Key for deduplicating broadcast messages (same sender + same content). */
+function broadcastKey(sender: string, content: string): string {
+  return `${sender}::${content}`;
 }
 
 export class MessageRenderer {
   private activeMessages: ActiveMessage[] = [];
   private agentRing: AgentRing | null = null;
+  /** Tracks recently seen broadcasts for dedup: key -> timestamp of first occurrence. */
+  private recentBroadcasts: Map<string, number> = new Map();
 
   setAgentRing(ring: AgentRing): void {
     this.agentRing = ring;
@@ -25,6 +37,28 @@ export class MessageRenderer {
   addMessage(event: MessageEvent, agentRing: AgentRing): void {
     const color = agentRing.getAgentColor(event.sender);
 
+    if (event.broadcasted) {
+      const key = broadcastKey(event.sender, event.content || '');
+      const now = Date.now();
+      const prev = this.recentBroadcasts.get(key);
+      if (prev && now - prev < BROADCAST_DEDUP_WINDOW) {
+        // Duplicate broadcast in the same burst — skip animation
+        return;
+      }
+      this.recentBroadcasts.set(key, now);
+
+      this.activeMessages.push({
+        senderName: event.sender,
+        recipientName: '', // not used for broadcasts
+        color,
+        msgType: event.msgType,
+        content: event.content || '',
+        startTime: now,
+        broadcast: true,
+      });
+      return;
+    }
+
     this.activeMessages.push({
       senderName: event.sender,
       recipientName: event.recipient,
@@ -32,97 +66,187 @@ export class MessageRenderer {
       msgType: event.msgType,
       content: event.content || '',
       startTime: Date.now(),
+      broadcast: false,
     });
   }
 
   reset(): void {
     this.activeMessages = [];
+    this.recentBroadcasts.clear();
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
     const now = Date.now();
-    const totalDuration = Math.max(PULSE_DURATION + FADE_DURATION, LABEL_DURATION);
+
+    // Expire old dedup entries
+    for (const [key, ts] of this.recentBroadcasts) {
+      if (now - ts > BROADCAST_DEDUP_WINDOW) {
+        this.recentBroadcasts.delete(key);
+      }
+    }
 
     // Remove expired messages
-    this.activeMessages = this.activeMessages.filter(
-      (m) => now - m.startTime < totalDuration
-    );
+    this.activeMessages = this.activeMessages.filter((m) => {
+      if (m.broadcast) {
+        return now - m.startTime < Math.max(BROADCAST_DURATION, LABEL_DURATION);
+      }
+      const totalDuration = Math.max(PULSE_DURATION + FADE_DURATION, LABEL_DURATION);
+      return now - m.startTime < totalDuration;
+    });
 
     for (const msg of this.activeMessages) {
-      const elapsed = now - msg.startTime;
-
-      // Resolve positions dynamically each frame
-      const s = this.agentRing?.getAgentPosition(msg.senderName);
-      const r = this.agentRing?.getAgentPosition(msg.recipientName);
-      if (!s || !r) continue;
-
-      if (elapsed < PULSE_DURATION) {
-        // Pulse traveling phase
-        const t = elapsed / PULSE_DURATION;
-
-        // Draw line (growing)
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        const currentX = s.x + (r.x - s.x) * t;
-        const currentY = s.y + (r.y - s.y) * t;
-        ctx.lineTo(currentX, currentY);
-        ctx.strokeStyle = this.getLineColor(msg, 0.6);
-        ctx.lineWidth = this.getLineWidth(msg);
-        ctx.stroke();
-
-        // Pulse dot
-        ctx.beginPath();
-        ctx.arc(currentX, currentY, 4, 0, Math.PI * 2);
-        ctx.fillStyle = this.getLineColor(msg, 1);
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = msg.color;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      } else if (elapsed < PULSE_DURATION + FADE_DURATION) {
-        // Fading phase
-        const fadeT = (elapsed - PULSE_DURATION) / FADE_DURATION;
-        const alpha = 1 - fadeT;
-
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(r.x, r.y);
-        ctx.strokeStyle = this.getLineColor(msg, alpha * 0.6);
-        ctx.lineWidth = this.getLineWidth(msg);
-        ctx.stroke();
+      if (msg.broadcast) {
+        this.drawBroadcast(ctx, msg, now);
+      } else {
+        this.drawDirectMessage(ctx, msg, now);
       }
+    }
+  }
 
-      // Content label along the midpoint of the line
-      if (msg.content && elapsed < LABEL_DURATION) {
-        const labelAlpha = elapsed < PULSE_DURATION
-          ? Math.min(1, (elapsed / PULSE_DURATION) * 2)
-          : 1 - (elapsed - PULSE_DURATION) / (LABEL_DURATION - PULSE_DURATION);
+  private drawBroadcast(ctx: CanvasRenderingContext2D, msg: ActiveMessage, now: number): void {
+    const s = this.agentRing?.getAgentPosition(msg.senderName);
+    const ring = this.agentRing?.getRingGeometry();
+    if (!s || !ring) return;
 
-        const midX = (s.x + r.x) / 2;
-        const midY = (s.y + r.y) / 2;
+    const elapsed = now - msg.startTime;
+    if (elapsed >= BROADCAST_DURATION) return;
 
-        // Extract a short summary from content
-        const label = this.summarizeContent(msg.content);
-        if (label) {
-          ctx.save();
-          ctx.globalAlpha = Math.max(0, labelAlpha) * 0.9;
-          ctx.font = '10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
+    const t = elapsed / BROADCAST_DURATION;
 
-          // Background pill
-          const metrics = ctx.measureText(label);
-          const pad = 4;
-          const pillW = metrics.width + pad * 2;
-          const pillH = 14;
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-          roundRect(ctx, midX - pillW / 2, midY - pillH - 4, pillW, pillH, 4);
-          ctx.fill();
+    // Ease-out (decelerate): 1 - (1-t)^3
+    const eased = 1 - Math.pow(1 - t, 3);
 
-          // Text
-          ctx.fillStyle = this.getLineColor(msg, 1);
-          ctx.fillText(label, midX, midY - 5);
-          ctx.restore();
-        }
+    // Distance from sender to the ring center, then to ring edge
+    const dx = ring.centerX - s.x;
+    const dy = ring.centerY - s.y;
+    const distToCenter = Math.sqrt(dx * dx + dy * dy);
+    const maxRadius = distToCenter + ring.radius;
+    const minRadius = 28; // start just outside the agent circle
+
+    const currentRadius = minRadius + (maxRadius - minRadius) * eased;
+
+    // Fade out in last 10% of range
+    let alpha = 0.7;
+    if (t > BROADCAST_FADE_START) {
+      const fadeT = (t - BROADCAST_FADE_START) / (1 - BROADCAST_FADE_START);
+      alpha = 0.7 * (1 - fadeT);
+    }
+
+    // Draw the ripple ring
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, currentRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = this.hexToRgba(msg.color, alpha);
+    ctx.lineWidth = 2.5 * (1 - t * 0.5); // thin out slightly as it expands
+    ctx.shadowBlur = 8 * (1 - t);
+    ctx.shadowColor = msg.color;
+    ctx.stroke();
+    ctx.restore();
+
+    // Content label at sender position (offset above)
+    if (msg.content && elapsed < LABEL_DURATION) {
+      const labelAlpha = t < 0.3
+        ? Math.min(1, t / 0.15)
+        : 1 - Math.max(0, (elapsed - PULSE_DURATION) / (LABEL_DURATION - PULSE_DURATION));
+
+      const label = this.summarizeContent(msg.content);
+      if (label) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, labelAlpha) * 0.9;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+
+        const metrics = ctx.measureText(label);
+        const pad = 4;
+        const pillW = metrics.width + pad * 2;
+        const pillH = 14;
+        const labelY = s.y - 40;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        roundRect(ctx, s.x - pillW / 2, labelY - pillH - 4, pillW, pillH, 4);
+        ctx.fill();
+
+        ctx.fillStyle = this.hexToRgba(msg.color, 1);
+        ctx.fillText(label, s.x, labelY - 5);
+        ctx.restore();
+      }
+    }
+  }
+
+  private drawDirectMessage(ctx: CanvasRenderingContext2D, msg: ActiveMessage, now: number): void {
+    const elapsed = now - msg.startTime;
+
+    // Resolve positions dynamically each frame
+    const s = this.agentRing?.getAgentPosition(msg.senderName);
+    const r = this.agentRing?.getAgentPosition(msg.recipientName);
+    if (!s || !r) return;
+
+    if (elapsed < PULSE_DURATION) {
+      // Pulse traveling phase
+      const t = elapsed / PULSE_DURATION;
+
+      // Draw line (growing)
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      const currentX = s.x + (r.x - s.x) * t;
+      const currentY = s.y + (r.y - s.y) * t;
+      ctx.lineTo(currentX, currentY);
+      ctx.strokeStyle = this.getLineColor(msg, 0.6);
+      ctx.lineWidth = this.getLineWidth(msg);
+      ctx.stroke();
+
+      // Pulse dot
+      ctx.beginPath();
+      ctx.arc(currentX, currentY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = this.getLineColor(msg, 1);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = msg.color;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if (elapsed < PULSE_DURATION + FADE_DURATION) {
+      // Fading phase
+      const fadeT = (elapsed - PULSE_DURATION) / FADE_DURATION;
+      const alpha = 1 - fadeT;
+
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(r.x, r.y);
+      ctx.strokeStyle = this.getLineColor(msg, alpha * 0.6);
+      ctx.lineWidth = this.getLineWidth(msg);
+      ctx.stroke();
+    }
+
+    // Content label along the midpoint of the line
+    if (msg.content && elapsed < LABEL_DURATION) {
+      const labelAlpha = elapsed < PULSE_DURATION
+        ? Math.min(1, (elapsed / PULSE_DURATION) * 2)
+        : 1 - (elapsed - PULSE_DURATION) / (LABEL_DURATION - PULSE_DURATION);
+
+      const midX = (s.x + r.x) / 2;
+      const midY = (s.y + r.y) / 2;
+
+      // Extract a short summary from content
+      const label = this.summarizeContent(msg.content);
+      if (label) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, labelAlpha) * 0.9;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+
+        // Background pill
+        const metrics = ctx.measureText(label);
+        const pad = 4;
+        const pillW = metrics.width + pad * 2;
+        const pillH = 14;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        roundRect(ctx, midX - pillW / 2, midY - pillH - 4, pillW, pillH, 4);
+        ctx.fill();
+
+        // Text
+        ctx.fillStyle = this.getLineColor(msg, 1);
+        ctx.fillText(label, midX, midY - 5);
+        ctx.restore();
       }
     }
   }
@@ -137,16 +261,18 @@ export class MessageRenderer {
     return content;
   }
 
-  private getLineColor(msg: ActiveMessage, alpha: number): string {
-    if (msg.msgType === 'input-needed') {
-      return `rgba(255, 193, 7, ${alpha})`;
-    }
-    // Parse hex color to rgba
-    const hex = msg.color;
+  private hexToRgba(hex: string, alpha: number): string {
     const rr = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${rr}, ${g}, ${b}, ${alpha})`;
+  }
+
+  private getLineColor(msg: ActiveMessage, alpha: number): string {
+    if (msg.msgType === 'input-needed') {
+      return `rgba(255, 193, 7, ${alpha})`;
+    }
+    return this.hexToRgba(msg.color, alpha);
   }
 
   private getLineWidth(msg: ActiveMessage): number {

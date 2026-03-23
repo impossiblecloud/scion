@@ -279,6 +279,10 @@ export class AgentRing {
     return null;
   }
 
+  getRingGeometry(): { centerX: number; centerY: number; radius: number } {
+    return { centerX: this.centerX, centerY: this.centerY, radius: this.ringRadius };
+  }
+
   getAgentColor(agentIdOrName: string): string {
     const byId = this.agents.get(agentIdOrName);
     if (byId) return byId.info.color;

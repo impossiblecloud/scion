@@ -123,58 +123,18 @@ If the role doesn't need a distinct persona beyond its instructions, you may omi
 
 Every team MUST have exactly one **orchestrator** (also called lead, supervisor, or coordinator). This is the agent the user starts directly — it then creates and manages the other agents.
 
-The orchestrator's `agents.md` must include instructions for managing the team using the scion CLI. Here is the essential orchestrator knowledge to include:
+Every scion agent already receives base instructions on using the scion CLI (starting agents, messaging, monitoring). The orchestrator's `agents.md` should **not** duplicate CLI usage details. Instead, focus on:
 
-### Starting Worker Agents
+- **What templates are available** and what each role does
+- **The workflow**: when to start which agents, what tasks to give them, how to handle their results
+- **Communication patterns**: what information flows between roles and when
+- **Completion criteria**: how the orchestrator knows the overall task is done
 
-```bash
-# Start a worker agent with a specific template and task
-scion start <agent-name> "<task description>" --type <template-name> --non-interactive --notify
+### Key orchestrator behaviors to instruct
 
-# Example: start a judge agent
-scion start judge-1 "Evaluate the argument for renewable energy subsidies" --type panel-judge --non-interactive --notify
-```
-
-**Critical flags:**
-- `--non-interactive` is MANDATORY. Without it, the CLI may block waiting for user input and hang the orchestrator.
-- `--notify` should be used when available (Hub mode). It causes the orchestrator to receive a notification message when an agent completes or needs help. Note: `--notify` requires Hub mode — in local mode, omit it and poll with `scion list` / `scion look` instead.
-
-### Monitoring Agents
-
-```bash
-# List all agents and their status
-scion list --non-interactive
-
-# Inspect an agent's recent output and current state
-scion look <agent-name>
-```
-
-### Communicating With Agents
-
-```bash
-# Send a message to an agent
-scion message <agent-name> "<message>" --non-interactive
-
-# Send a message and interrupt the agent's current work
-scion message <agent-name> "<urgent instruction>" --interrupt --non-interactive
-
-# Check your inbox for messages from agents (Hub mode)
-scion messages
-```
-
-In Hub mode, agents can also use `scion messages` to read their inbox — this is useful for workers that need to receive structured data or multi-step instructions from the orchestrator.
-
-### Waiting for Agents
-
-When the orchestrator starts workers and needs to wait for them, it MUST signal that it is blocked:
-
-```bash
-sciontool status blocked "Waiting for agent <name> to complete"
-```
-
-**In Hub mode** (with `--notify`): The orchestrator will receive a notification message when a worker completes or needs input. It should then react accordingly — inspect the result, send follow-up instructions, or proceed with the workflow.
-
-**In local mode** (without `--notify`): The orchestrator should periodically poll with `scion list --non-interactive` to check agent statuses, and use `scion look <agent-name>` to inspect results when an agent reaches a terminal state.
+1. **Starting workers**: Tell the orchestrator which template names to use and how to name agents. Recommend `--notify` so the orchestrator receives notifications when workers complete or need help.
+2. **Relaying information**: Workers don't communicate directly with each other. The orchestrator reads output from one and relays relevant information to others.
+3. **Signaling blocked state**: When waiting for workers, the orchestrator must call `sciontool status blocked "Waiting for <reason>"` so the system doesn't mark it as stalled.
 
 ### Orchestrator agents.md Template
 
@@ -190,29 +150,12 @@ You are the orchestrator for [team description]. Your job is to:
 2. [high-level workflow step 2]
 3. [...]
 
-## Team Management
+## Available Agent Roles
 
-You manage a team of specialized agents using the scion CLI.
+- `<template-1>`: [what this role does, what it expects as input, what it produces]
+- `<template-2>`: [what this role does, what it expects as input, what it produces]
 
-### Starting Agents
-To start a worker: `scion start <name> "<task>" --type <template> --non-interactive --notify`
-(Note: `--notify` requires Hub mode. In local mode, omit it and poll with `scion list`.)
-
-Available templates:
-- `<template-1>`: [what this role does]
-- `<template-2>`: [what this role does]
-
-### Monitoring and Communication
-- Check status: `scion list --non-interactive`
-- Inspect output: `scion look <agent-name>`
-- Send message: `scion message <agent-name> "<msg>" --non-interactive`
-- Interrupt: `scion message <agent-name> "<msg>" --interrupt --non-interactive`
-- Check inbox: `scion messages` (Hub mode)
-
-### Waiting
-When waiting for agents, signal: `sciontool status blocked "Waiting for <name>"`
-In Hub mode with `--notify`, you will be notified when agents complete or need help.
-In local mode, poll with `scion list --non-interactive` and `scion look <name>`.
+When starting agents, use `--notify` so you are notified when they complete or need help.
 
 ## Workflow
 
@@ -254,10 +197,10 @@ The orchestrator's instructions reference all other templates by name, so create
 Check that:
 - [ ] Every template has `scion-agent.yaml` with `schema_version: "1"`
 - [ ] Every `agents.md` starts with the status reporting boilerplate
-- [ ] The orchestrator references the correct template names in its start commands
-- [ ] The orchestrator uses `--non-interactive` and `--notify` on all scion commands
+- [ ] The orchestrator references the correct template names
 - [ ] Template directory names are kebab-case
 - [ ] The workflow described in the orchestrator's instructions matches the user's intent
+- [ ] Templates focus on roles and interactions, not CLI usage details
 
 ## Complete Example: 3-Judge Debate Panel
 
@@ -396,21 +339,11 @@ Do not follow this completion step with asking the user another question like "w
 
 You manage a 3-judge debate panel. Your task is given as the debate question.
 
-## Team Management
+## Available Agent Roles
 
-You manage judge agents using the scion CLI.
+- `panel-judge`: A debate panelist who forms positions, argues with evidence, and works toward consensus. Give each judge the debate question as their task.
 
-### Starting Agents
-To start a judge: `scion start <name> "<task>" --type panel-judge --non-interactive --notify`
-
-### Monitoring and Communication
-- Check status: `scion list --non-interactive`
-- Inspect output: `scion look <agent-name>`
-- Send message: `scion message <agent-name> "<msg>" --non-interactive`
-
-### Waiting
-When waiting for agents, signal: `sciontool status blocked "Waiting for judges to respond"`
-You will be notified when they complete or need help.
+When starting judges, use `--notify` so you are notified when they complete each round.
 
 ## Workflow
 
@@ -446,8 +379,7 @@ For each round:
 ## Gotchas
 
 - **Never omit the status boilerplate** from `agents.md`. Without it, the scion orchestration system cannot track agent state and the agent will appear stalled.
-- **Always use `--non-interactive`** on scion CLI commands. Without this flag, the CLI may prompt for user input and hang the agent indefinitely.
-- **Use `--notify` when in Hub mode** when starting agents. This enables push notifications when workers finish. In local mode, `--notify` is unavailable — the orchestrator must poll with `scion list` and `scion look` instead.
+- **Don't duplicate CLI usage instructions** in templates. Every agent already receives base scion CLI instructions. Templates should focus on roles, interactions, and workflow.
 - **Don't create `home/` directories** in custom templates. The default template provides all infrastructure files. Custom templates only need instruction and config files.
 - **Template names must match directory names**. The name in `scion-agent.yaml` `description` is cosmetic; the actual template name used in `--type` is the directory name.
 - **Workers communicate through the orchestrator**. Agents don't message each other directly — the orchestrator reads output from one and relays to others.

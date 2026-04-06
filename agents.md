@@ -98,10 +98,10 @@ Likewise, do not mess with any active agents while testing the tool, such as cre
 
 You are operating in a restricted, non-interactive sandbox environment. Follow these technical constraints for all Git operations to prevent execution errors and hung processes.
 
-### 1. Local-Only Operations (No Network Access)
-* **Restriction:** The environment is air-gapped from `origin`. Commands like `git fetch`, `git pull`, or `git push` will fail.
+### 1. Prefer Local-Only Operations
+* **Restriction:** The environment may likely be in a worktree in a container, without the credentials to work with `origin`. Commands like `git fetch`, `git pull`, or `git push` may fail.
 * **Directive:** Always assume the local `main` branch is the source of truth. 
-* **Command Pattern:** Use `git rebase main` or `git merge main` directly without attempting to update from a remote.
+* **Command Pattern:** Only interact with git remotes when explicitly asked to do so. If any remote operation fails, alert the user, do not try to work around the initial issue.
 
 ### 2. Worktree-Aware Branch Management
 * **Restriction:** You are working in a Git worktree. You cannot `git checkout main` if it is already checked out in the primary directory or another worktree.

@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go
-ARG GO_VERSION=1.26.1
+ARG GO_VERSION=1.26.2
 RUN ARCH=$(dpkg --print-architecture) && \
     case "${ARCH}" in \
       amd64) GO_ARCH='linux-amd64' ;; \
@@ -79,8 +79,6 @@ RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/git
 # Setup gcsfuse repository
 RUN . /etc/os-release && \
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt gcsfuse-${VERSION_CODENAME} main" | tee /etc/apt/sources.list.d/gcsfuse.list
-
-# Install runtime dependencies for Git and common tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     ca-certificates \
@@ -116,8 +114,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nano \
     vim \
     python3-venv \
+    python3-pip \
     lsb-release \
     chromium \
+    xz-utils \
+    zip \
+    openssh-client \
+    gosu \
+    tree \
+    file \
+    openssl \
+    bash-completion \
+    iputils-ping \
+    netcat-openbsd \
+    net-tools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -148,13 +158,82 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /usr/local/bin
 
+# Install yamllint
+RUN pip3 install --no-cache-dir yamllint --break-system-packages
+
+# Install OpenTofu
+ARG TOFU_VERSION=1.11.6
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_${ARCH}.deb" \
+        -o /tmp/tofu.deb \
+    && dpkg -i /tmp/tofu.deb \
+    && rm /tmp/tofu.deb
+
+# Install kubectl
+ARG KUBECTL_VERSION=v1.35.3
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
+        -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl
+
+# Install Helm
+ARG HELM_VERSION=v4.1.4
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
+    | tar -xz --strip-components=1 -C /usr/local/bin linux-${ARCH}/helm
+
+# Install Helmfile
+ARG HELMFILE_VERSION=1.4.4
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin helmfile
+
+# Install Helm diff plugin (required by helmfile)
+# Install into a shared location so all users can find it
+ENV HELM_DATA_HOME=/usr/local/share/helm
+ARG HELM_DIFF_VERSION=3.10.0
+# --verify=false is required for URL-based plugin installs; Helm's verification
+# mechanism only works for plugins served from a signed repository index.
+RUN helm plugin install https://github.com/databus23/helm-diff \
+    --version "${HELM_DIFF_VERSION}" --verify=false
+RUN chmod -R a+rX /usr/local/share/helm
+
+# Install single-binary tools (talosctl, butane, yq, terragrunt)
+ARG TALOS_VERSION=v1.12.6
+ARG BUTANE_VERSION=v0.27.0
+ARG YQ_VERSION=4.52.5
+ARG TERRAGRUNT_VERSION=1.0.0
+RUN ARCH=$(dpkg --print-architecture) && \
+    BUTANE_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-gnu") && \
+    curl -fsSL "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-${ARCH}" \
+        -o /usr/local/bin/talosctl \
+    && curl -fsSL "https://github.com/coreos/butane/releases/download/${BUTANE_VERSION}/butane-${BUTANE_ARCH}" \
+        -o /usr/local/bin/butane \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH}" \
+        -o /usr/local/bin/yq \
+    && curl -fsSL "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_${ARCH}" \
+        -o /usr/local/bin/terragrunt \
+    && chmod +x /usr/local/bin/talosctl /usr/local/bin/butane \
+               /usr/local/bin/yq /usr/local/bin/terragrunt
+
+# Install AWS CLI v2
+RUN ARCH=$(dpkg --print-architecture) && \
+    AWS_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/awscliv2.zip /tmp/aws
+
 # Setup npm global directory
 RUN mkdir -p /usr/local/share/npm-global
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=/usr/local/share/npm-global/bin:/usr/local/go/bin:/usr/local/gcloud/google-cloud-sdk/bin:$PATH
+ENV GOPATH=/root/go
+ENV PATH=/usr/local/share/npm-global/bin:/usr/local/go/bin:/root/go/bin:/usr/local/gcloud/google-cloud-sdk/bin:$PATH
 ENV LC_ALL=C.UTF-8
 ENV EDITOR=nano
 ENV VISUAL=nano
+ENV HELM_DATA_HOME=/usr/local/share/helm
+ENV TF_PLUGIN_CACHE_DIR=/root/.terraform.d/plugin-cache
 
 # Install Chrome DevTools MCP server globally
 RUN npm install -g chrome-devtools-mcp

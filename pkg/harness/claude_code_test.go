@@ -118,6 +118,61 @@ func TestClaudeCode_Provision(t *testing.T) {
 	}
 }
 
+func TestClaudeCode_Provision_GitClone(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Simulate host path that contains /.scion/agents/ — this triggers the
+	// worktree heuristic in the old code, producing /repo-root/.scion/agents/...
+	// instead of /workspace.
+	agentDir := filepath.Join(tmpDir, "grove", ".scion", "agents", "test-agent")
+	agentHome := filepath.Join(agentDir, "home")
+	agentWorkspace := filepath.Join(agentDir, "workspace")
+	os.MkdirAll(agentHome, 0755)
+	os.MkdirAll(agentWorkspace, 0755)
+
+	claudeJSONPath := filepath.Join(agentHome, ".claude.json")
+	initialCfg := map[string]interface{}{
+		"projects": map[string]interface{}{
+			"/old/path": map[string]interface{}{
+				"hasTrustDialogAccepted": true,
+			},
+		},
+	}
+	data, _ := json.Marshal(initialCfg)
+	os.WriteFile(claudeJSONPath, data, 0644)
+
+	// Provision with git-clone context — workspace should resolve to /workspace
+	ctx := api.ContextWithGitClone(context.Background(), &api.GitCloneConfig{
+		URL: "https://github.com/example/repo.git",
+	})
+
+	c := &ClaudeCode{}
+	if err := c.Provision(ctx, "test-agent", agentDir, agentHome, agentWorkspace); err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+
+	updatedData, err := os.ReadFile(claudeJSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updatedCfg map[string]interface{}
+	json.Unmarshal(updatedData, &updatedCfg)
+
+	projects, ok := updatedCfg["projects"].(map[string]interface{})
+	if !ok {
+		t.Fatal("projects map not found in updated config")
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected 1 project entry, got %d", len(projects))
+	}
+	if _, ok := projects["/workspace"]; !ok {
+		keys := make([]string, 0, len(projects))
+		for k := range projects {
+			keys = append(keys, k)
+		}
+		t.Errorf("expected project key /workspace, got %v", keys)
+	}
+}
+
 func TestClaudeCode_Provision_VertexAI(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := tmpDir

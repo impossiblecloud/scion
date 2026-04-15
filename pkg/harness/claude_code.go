@@ -101,7 +101,7 @@ func (c *ClaudeCode) HasSystemPrompt(agentHome string) bool {
 
 func (c *ClaudeCode) Provision(ctx context.Context, agentName, agentDir, agentHome, agentWorkspace string) error {
 	// 1. Update .claude.json project paths
-	if err := c.provisionClaudeJSON(agentHome, agentWorkspace); err != nil {
+	if err := c.provisionClaudeJSON(ctx, agentHome, agentWorkspace); err != nil {
 		return err
 	}
 
@@ -164,7 +164,7 @@ func (c *ClaudeCode) Provision(ctx context.Context, agentName, agentDir, agentHo
 	return nil
 }
 
-func (c *ClaudeCode) provisionClaudeJSON(agentHome, agentWorkspace string) error {
+func (c *ClaudeCode) provisionClaudeJSON(ctx context.Context, agentHome, agentWorkspace string) error {
 	claudeJSONPath := filepath.Join(agentHome, ".claude.json")
 	if _, err := os.Stat(claudeJSONPath); os.IsNotExist(err) {
 		return nil
@@ -181,12 +181,14 @@ func (c *ClaudeCode) provisionClaudeJSON(agentHome, agentWorkspace string) error
 	}
 
 	containerWorkspace := "/workspace"
-	// Derive the container workspace path from the agent directory structure.
-	// The host path is like .../grove/.scion/agents/<name>/workspace and maps
-	// to /repo-root/.scion/agents/<name>/workspace inside the container.
-	// Use the .scion/agents/ segment as a reliable anchor rather than
-	// util.RepoRoot() which depends on the broker's working directory.
-	if idx := strings.Index(agentWorkspace, "/.scion/agents/"); idx >= 0 {
+	// In git-clone mode the workspace is always mounted at /workspace,
+	// so skip the worktree-relative path derivation.
+	if api.GitCloneFromContext(ctx) != nil {
+		// keep default "/workspace"
+	} else if idx := strings.Index(agentWorkspace, "/.scion/agents/"); idx >= 0 {
+		// Derive the container workspace path from the agent directory structure.
+		// The host path is like .../grove/.scion/agents/<name>/workspace and maps
+		// to /repo-root/.scion/agents/<name>/workspace inside the container.
 		containerWorkspace = "/repo-root" + agentWorkspace[idx:]
 	} else if repoRoot, err := util.RepoRoot(); err == nil {
 		relWorkspace, err := filepath.Rel(repoRoot, agentWorkspace)

@@ -240,6 +240,13 @@ RUN npm install -g chrome-devtools-mcp
 # Install Prometheus MCP server
 RUN npm install -g prometheus-mcp-server
 
+# Install SOPS (Secrets OPerationS)
+ARG SOPS_VERSION=3.9.4
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${ARCH}" \
+        -o /usr/local/bin/sops && \
+    chmod +x /usr/local/bin/sops
+
 # Install Kubeshark CLI (for remote MCP access via kubeshark mcp serve)
 ARG KUBESHARK_VERSION=53.2.2
 RUN ARCH=$(dpkg --print-architecture) && \

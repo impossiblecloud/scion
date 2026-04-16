@@ -69,7 +69,7 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
   chmod 0440 /etc/sudoers.d/scion-firewall
 
 # Install Claude - currently native installer is not working in container
-# RUN curl -fsSL https://claude.ai/install.sh | bash
+# RUN curl -sSL https://claude.ai/install.sh | bash
 # ENV PATH=/home/scion/.local/bin:$PATH
 
 RUN npm install -g @anthropic-ai/claude-code \

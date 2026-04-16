@@ -196,7 +196,7 @@ ARG HELM_DIFF_VERSION=3.10.0
 # mechanism only works for plugins served from a signed repository index.
 RUN helm plugin install https://github.com/databus23/helm-diff \
     --version "${HELM_DIFF_VERSION}" --verify=false
-RUN chmod -R a+rX /usr/local/share/helm
+RUN chmod -R a+rwX /usr/local/share/helm
 
 # Install single-binary tools (talosctl, butane, yq, terragrunt)
 ARG TALOS_VERSION=v1.12.6
@@ -233,10 +233,19 @@ ENV LC_ALL=C.UTF-8
 ENV EDITOR=nano
 ENV VISUAL=nano
 ENV HELM_DATA_HOME=/usr/local/share/helm
-ENV TF_PLUGIN_CACHE_DIR=/root/.terraform.d/plugin-cache
 
 # Install Chrome DevTools MCP server globally
 RUN npm install -g chrome-devtools-mcp
+
+# Install Prometheus MCP server
+RUN npm install -g prometheus-mcp-server
+
+# Install Kubeshark CLI (for remote MCP access via kubeshark mcp serve)
+ARG KUBESHARK_VERSION=53.2.2
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/kubeshark/kubeshark/releases/download/v${KUBESHARK_VERSION}/kubeshark_linux_${ARCH}" \
+        -o /usr/local/bin/kubeshark && \
+    chmod +x /usr/local/bin/kubeshark
 
 # Default to bash - no scion-specific entrypoint
 CMD ["bash"]

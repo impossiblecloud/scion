@@ -940,6 +940,10 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id, groveID 
 		ResolvedSecrets []api.ResolvedSecret `json:"resolvedSecrets,omitempty"`
 		InlineConfig    *api.ScionConfig     `json:"inlineConfig,omitempty"`
 		SharedDirs      []api.SharedDir      `json:"sharedDirs,omitempty"`
+		// SharedWorkspace must be re-sent on every start: hub-grove agents
+		// share a single git checkout instead of being given a worktree, and
+		// without this flag the broker would create a worktree on restart.
+		SharedWorkspace bool `json:"sharedWorkspace,omitempty"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&startReq); err != nil {
@@ -951,11 +955,12 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id, groveID 
 
 	// Build config for buildStartContext (startAgent uses a subset of CreateAgentConfig)
 	var cfg *CreateAgentConfig
-	if startReq.Task != "" || startReq.HarnessConfig != "" || len(startReq.SharedDirs) > 0 {
+	if startReq.Task != "" || startReq.HarnessConfig != "" || len(startReq.SharedDirs) > 0 || startReq.SharedWorkspace {
 		cfg = &CreateAgentConfig{
-			Task:          startReq.Task,
-			HarnessConfig: startReq.HarnessConfig,
-			SharedDirs:    startReq.SharedDirs,
+			Task:            startReq.Task,
+			HarnessConfig:   startReq.HarnessConfig,
+			SharedDirs:      startReq.SharedDirs,
+			SharedWorkspace: startReq.SharedWorkspace,
 		}
 	}
 

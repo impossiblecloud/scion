@@ -256,7 +256,10 @@ type RuntimeBrokerClient interface {
 	// resolvedEnv contains environment variables resolved from Hub storage (API keys, etc.).
 	// harnessConfig is the harness config name to use for the agent (e.g. "claude", "gemini").
 	// resolvedSecrets contains type-aware secrets (including file-type) for auth resolution.
-	StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret, inlineConfig *api.ScionConfig, sharedDirs []api.SharedDir) (*RemoteAgentResponse, error)
+	// sharedWorkspace indicates the grove uses a shared workspace mount
+	// (hub-grove / git-workspace hybrid) so the broker must not create a
+	// per-agent worktree on (re-)start.
+	StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret, inlineConfig *api.ScionConfig, sharedDirs []api.SharedDir, sharedWorkspace bool) (*RemoteAgentResponse, error)
 
 	// StopAgent stops an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.

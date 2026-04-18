@@ -161,7 +161,7 @@ func (t *brokerHTTPTransport) CreateAgent(ctx context.Context, brokerID, brokerE
 	return &result, nil
 }
 
-func (t *brokerHTTPTransport) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret, inlineConfig *api.ScionConfig, sharedDirs []api.SharedDir) (*RemoteAgentResponse, error) {
+func (t *brokerHTTPTransport) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret, inlineConfig *api.ScionConfig, sharedDirs []api.SharedDir, sharedWorkspace bool) (*RemoteAgentResponse, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 	if groveID != "" {
 		endpoint += "?groveId=" + url.QueryEscape(groveID)
@@ -190,6 +190,9 @@ func (t *brokerHTTPTransport) StartAgent(ctx context.Context, brokerID, brokerEn
 	}
 	if len(sharedDirs) > 0 {
 		payload["sharedDirs"] = sharedDirs
+	}
+	if sharedWorkspace {
+		payload["sharedWorkspace"] = true
 	}
 
 	var body []byte

@@ -75,14 +75,33 @@ builder_run_target() {
   local config
   config="$(cloud_build_config_for_target "${target}")" || return 1
 
+  # Auto-detect project from the registry path (<host>/<project>/<repo>)
+  # when neither $GCLOUD_PROJECT nor gcloud config provides one.
   local project="${GCLOUD_PROJECT:-}"
   if [[ -z "${project}" ]]; then
     project="$(gcloud config get-value project 2>/dev/null)" || true
+  fi
+  if [[ -z "${project}" && -n "${registry}" ]]; then
+    project="$(echo "${registry}" | cut -d/ -f2)"
   fi
   if [[ -z "${project}" ]]; then
     echo "Error: could not determine GCP project." >&2
     echo "Set \$GCLOUD_PROJECT or run 'gcloud config set project <project>'." >&2
     return 1
+  fi
+
+  # Warn if the registry lives in a different project than the one Cloud
+  # Build will run in — the build SA in that project likely lacks push
+  # access to the other project's Artifact Registry.
+  if [[ -n "${registry}" ]]; then
+    local reg_project
+    reg_project="$(echo "${registry}" | cut -d/ -f2)"
+    if [[ "${reg_project}" != "${project}" ]]; then
+      echo "Warning: Cloud Build project '${project}' differs from registry project '${reg_project}'." >&2
+      echo "The build SA in '${project}' may not have push access to '${registry}'." >&2
+      echo "Consider: export GCLOUD_PROJECT=${reg_project}" >&2
+      echo ""
+    fi
   fi
 
   # SHORT_SHA / COMMIT_SHA are computed once by the orchestrator. Fall back

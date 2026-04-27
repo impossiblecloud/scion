@@ -62,22 +62,28 @@ When two steps in the same run depend on each other, the orchestrator threads `B
 ### Quick Start: Build Your Own Images
 
 ```bash
+# Build locally without ever pushing — bare tags (scion-claude:latest, etc.)
+# land in your local engine's image store. Default builder: local-docker.
+image-build/scripts/build-images.sh --target all
+
+# Same, with Podman
+image-build/scripts/build-images.sh --builder local-podman --target all
+
 # Build and push to your registry (default builder: local-docker)
 image-build/scripts/build-images.sh --registry ghcr.io/myorg --push
 
-# Use Podman instead (single-arch by default)
-image-build/scripts/build-images.sh --builder local-podman --registry quay.io/myorg --push
-
-# Submit to Cloud Build
+# Submit to Cloud Build (--registry is required here)
 image-build/scripts/build-images.sh --builder cloud-build \
   --registry us-central1-docker.pkg.dev/myproj/scion --target all
 
 # Preview what would run, without executing
 image-build/scripts/build-images.sh --target all --platform all --dry-run
 
-# Configure scion to use the images you built
+# Configure scion to use the images you built (only when pushing to a registry)
 scion config set image_registry ghcr.io/myorg
 ```
+
+`--registry` is optional for local builds without `--push`; it's required when `--push` is set or when using `--builder cloud-build`.
 
 ### Quick Start: Google Cloud Build
 

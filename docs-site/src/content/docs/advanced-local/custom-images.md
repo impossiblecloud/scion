@@ -51,21 +51,29 @@ The orchestrator computes tags, threads `BASE_IMAGE` between layers, and dispatc
 
 ### Option 1: Local Docker Build
 
-Build all images locally and push to your registry. Once `core-base` has been built, rebuilds can often use the default `common` build target.
+Build all images locally. Once `core-base` has been built, rebuilds can often use the default `common` build target.
 
 ```bash
-# Build all layers (core-base, scion-base, harnesses, hub), then push
-# (default builder: local-docker)
+# Build all layers locally without pushing — bare tags
+# (scion-claude:latest, etc.) land in your local docker engine.
+image-build/scripts/build-images.sh --target all
+
+# Or build and push to your registry
 image-build/scripts/build-images.sh --registry ghcr.io/myorg --push --target all
 
-# Configure Scion to use them
+# When pushing, configure Scion to use them
 scion config set image_registry ghcr.io/myorg
 ```
+
+`--registry` is optional for local-only builds. Omit it and the orchestrator tags images with bare names that stay in your local image store. Supply it (without `--push`) if you'd rather have fully-qualified tags locally — nothing leaves the machine until you `docker push` separately. `--registry` becomes required as soon as you pass `--push` or `--builder cloud-build`.
 
 ### Option 2: Local Podman Build
 
 ```bash
-# Single-arch build (native arch only)
+# Single-arch local build, no registry needed
+image-build/scripts/build-images.sh --builder local-podman --target all
+
+# Or push to a registry
 image-build/scripts/build-images.sh \
   --builder local-podman \
   --registry quay.io/myorg \
@@ -176,7 +184,7 @@ The `image-build/scripts/build-images.sh` orchestrator supports the following op
 
 | Flag | Description | Default |
 | :--- | :--- | :--- |
-| `--registry <path>` | **Required.** Target registry path (e.g., `ghcr.io/myorg`). | — |
+| `--registry <path>` | Target registry path (e.g., `ghcr.io/myorg`). Required when `--push` is set or with `--builder cloud-build`. When omitted for a local-only build, images are tagged with bare names (e.g., `scion-claude:latest`) and stay in the local store. | — |
 | `--builder <name>` | Backend: `local-docker`, `local-podman`, or `cloud-build`. | `local-docker` |
 | `--target <target>` | Build target (see below). | `common` |
 | `--tag <tag>` | Mutable image tag. The `:<short-sha>` tag is always added when in a git repo. | `latest` |
@@ -224,9 +232,8 @@ image-build/scripts/build-images.sh \
   --tag v1.2.0 \
   --push
 
-# Local build for testing (no push, current architecture only)
-image-build/scripts/build-images.sh \
-  --registry local/test
+# Local build for testing (no push, current architecture only, bare tags)
+image-build/scripts/build-images.sh --target all
 
 # Preview what would run, without executing anything
 image-build/scripts/build-images.sh \

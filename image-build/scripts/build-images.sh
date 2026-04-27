@@ -45,14 +45,15 @@ source "${SCRIPT_DIR}/lib/targets.sh"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") --registry <registry> [options]
+Usage: $(basename "$0") [options]
 
 Build Scion container images via a pluggable builder backend.
 
-Required:
-  --registry <path>     Target registry path (e.g., ghcr.io/myorg)
-
 Options:
+  --registry <path>     Target registry path (e.g., ghcr.io/myorg).
+                        Required when --push is set or with --builder cloud-build.
+                        When omitted, images are tagged with bare names
+                        (e.g., scion-claude:latest) and stay in the local store.
   --builder <name>      Build backend (default: local-docker)
                           local-docker  - docker buildx, local
                           local-podman  - podman build, local (single-arch by default)
@@ -96,10 +97,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${REGISTRY}" ]]; then
-  echo "Error: --registry is required" >&2
-  usage 1
-fi
 REGISTRY="${REGISTRY%/}"
 
 # Validate builder against allow-list.
@@ -141,6 +138,19 @@ if [[ "${PLATFORMS}" == *","* && "${PUSH}" != "true" ]]; then
   PUSH="true"
 fi
 
+# --registry is required for any path that publishes images. Without it,
+# we tag with bare names (scion-claude:latest) and the images stay local.
+if [[ -z "${REGISTRY}" ]]; then
+  if [[ "${BUILDER}" == "cloud-build" ]]; then
+    echo "Error: --registry is required with --builder cloud-build" >&2
+    exit 1
+  fi
+  if [[ "${PUSH}" == "true" ]]; then
+    echo "Error: --registry is required with --push" >&2
+    exit 1
+  fi
+fi
+
 # --load is the inverse of --push for per-image builders that build into a
 # local engine.
 LOAD="false"
@@ -168,11 +178,16 @@ if [[ "${DRY_RUN}" != "true" ]] && ! builder_check; then
 fi
 
 # Resolve step list once for both per-image execution and dry-run printing.
-mapfile -t STEPS < <(resolve_targets "${TARGET}")
+# Read into an array via a while-loop for compatibility with Bash 3.2 (macOS
+# /bin/bash), which lacks `mapfile`/`readarray`.
+STEPS=()
+while IFS= read -r line; do
+  STEPS+=("${line}")
+done < <(resolve_targets "${TARGET}")
 
 echo "Builder:  ${BUILDER}  (mode: ${BUILDER_MODE})"
 echo "Target:   ${TARGET}"
-echo "Registry: ${REGISTRY}"
+echo "Registry: ${REGISTRY:-<none — bare local tags>}"
 echo "Tag:      ${TAG}${SHORT_SHA:+ (+ :${SHORT_SHA})}"
 if [[ "${BUILDER_MODE}" == "per-image" ]]; then
   echo "Platforms: ${PLATFORMS:-<native>}"
@@ -220,12 +235,17 @@ resolve_base_tag() {
 }
 
 # Build the comma-separated tag list for an image: always :<tag>, plus
-# :<short-sha> when available.
+# :<short-sha> when available. Omits the registry prefix when REGISTRY is
+# empty (local-only build), so tags are bare like "scion-claude:latest".
 compute_tags() {
   local image_name="$1"
-  local tags="${REGISTRY}/${image_name}:${TAG}"
+  local prefix=""
+  if [[ -n "${REGISTRY}" ]]; then
+    prefix="${REGISTRY}/"
+  fi
+  local tags="${prefix}${image_name}:${TAG}"
   if [[ -n "${SHORT_SHA}" ]]; then
-    tags="${tags},${REGISTRY}/${image_name}:${SHORT_SHA}"
+    tags="${tags},${prefix}${image_name}:${SHORT_SHA}"
   fi
   echo "${tags}"
 }
@@ -269,7 +289,7 @@ if [[ "${DRY_RUN}" == "true" ]]; then
   echo "Dry run complete. No images were built or pushed."
 else
   echo "Done."
-  if [[ "${BUILDER_MODE}" == "per-image" ]]; then
+  if [[ "${BUILDER_MODE}" == "per-image" && -n "${REGISTRY}" ]]; then
     echo ""
     echo "To configure scion to use these images, run:"
     echo "  scion config set image_registry ${REGISTRY}"

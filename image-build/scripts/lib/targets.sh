@@ -120,20 +120,26 @@ step_context_dir() {
 # Emits one KEY=VALUE line per build-arg on stdout. Reads orchestrator
 # state from environment: REGISTRY, TAG, SHORT_SHA, COMMIT_SHA, BASE_TAG.
 # BASE_TAG is the tag (sha or mutable) the orchestrator chose for this
-# step's parent image.
+# step's parent image. When REGISTRY is empty (local-only build), BASE_IMAGE
+# is emitted with a bare image name (e.g. core-base:latest) so it matches
+# the tag the previous step actually wrote into the local image store.
 step_build_args() {
+  local prefix=""
+  if [[ -n "${REGISTRY:-}" ]]; then
+    prefix="${REGISTRY}/"
+  fi
   case "$1" in
     core-base)
       # No build-args.
       ;;
     scion-base)
-      echo "BASE_IMAGE=${REGISTRY}/core-base:${BASE_TAG}"
+      echo "BASE_IMAGE=${prefix}core-base:${BASE_TAG}"
       if [[ -n "${COMMIT_SHA:-}" ]]; then
         echo "GIT_COMMIT=${COMMIT_SHA}"
       fi
       ;;
     scion-claude|scion-gemini|scion-opencode|scion-codex|scion-hub)
-      echo "BASE_IMAGE=${REGISTRY}/scion-base:${BASE_TAG}"
+      echo "BASE_IMAGE=${prefix}scion-base:${BASE_TAG}"
       ;;
     *) return 1 ;;
   esac

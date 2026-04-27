@@ -287,6 +287,7 @@ type ProvisionInputs struct {
 	SystemPrompt   string `json:"system_prompt,omitempty"`
 	Telemetry      string `json:"telemetry,omitempty"`
 	AuthCandidates string `json:"auth_candidates,omitempty"`
+	MCPServers     string `json:"mcp_servers,omitempty"`
 }
 
 type ProvisionOutputs struct {
@@ -345,6 +346,13 @@ func (c *ContainerScriptHarness) Provision(ctx context.Context, agentName, agent
 		}
 	}
 
+	// Stage the shared scion_harness.py helper next to provision.py so the
+	// in-container script can import it (provision.py adds the bundle dir to
+	// sys.path).
+	if err := writeSharedHarnessHelper(filepath.Join(bundleHostPath, "scion_harness.py")); err != nil {
+		return fmt.Errorf("stage scion_harness.py: %w", err)
+	}
+
 	manifest := ProvisionManifest{
 		SchemaVersion:    1,
 		Command:          "provision",
@@ -374,6 +382,9 @@ func (c *ContainerScriptHarness) Provision(ctx context.Context, agentName, agent
 	}
 	if fileExistsHelper(filepath.Join(bundleHostPath, "inputs", "auth-candidates.json")) {
 		manifest.Inputs.AuthCandidates = filepath.Join(bundleContainerPath, "inputs", "auth-candidates.json")
+	}
+	if fileExistsHelper(filepath.Join(bundleHostPath, "inputs", "mcp-servers.json")) {
+		manifest.Inputs.MCPServers = filepath.Join(bundleContainerPath, "inputs", "mcp-servers.json")
 	}
 
 	manifestPath := filepath.Join(bundleHostPath, "manifest.json")
@@ -476,6 +487,26 @@ func isSafeEnvName(name string) bool {
 		}
 	}
 	return true
+}
+
+// ApplyMCPSettings stages the universal mcp_servers map into
+// agent_home/.scion/harness/inputs/mcp-servers.json so the container-side
+// provision.py can translate it into the harness's native MCP config. An empty
+// or nil map is a no-op (no file written) so existing inline harness MCP
+// configuration in home/ files keeps working unchanged.
+func (c *ContainerScriptHarness) ApplyMCPSettings(agentHome string, mcpServers map[string]api.MCPServerConfig) error {
+	if len(mcpServers) == 0 {
+		return nil
+	}
+	payload := map[string]interface{}{
+		"schema_version": 1,
+		"mcp_servers":    mcpServers,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal mcp servers input: %w", err)
+	}
+	return c.stageInputFile(agentHome, "mcp-servers.json", data)
 }
 
 // ApplyTelemetrySettings stages telemetry config into

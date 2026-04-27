@@ -245,6 +245,96 @@ func TestContainerScriptHarness_ApplyAuthSettings_WritesCandidates(t *testing.T)
 	}
 }
 
+func TestContainerScriptHarness_ApplyMCPSettings_WritesInput(t *testing.T) {
+	h, _ := newTestContainerScriptHarness(t)
+	agentHome := t.TempDir()
+
+	servers := map[string]api.MCPServerConfig{
+		"chrome-devtools": {
+			Transport: api.MCPTransportStdio,
+			Command:   "chrome-devtools-mcp",
+			Args:      []string{"--headless"},
+		},
+		"remote_api": {
+			Transport: api.MCPTransportSSE,
+			URL:       "http://localhost:8080/mcp/sse",
+		},
+	}
+	if err := h.ApplyMCPSettings(agentHome, servers); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(agentHome, ".scion", "harness", "inputs", "mcp-servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if payload["schema_version"] != float64(1) {
+		t.Errorf("schema_version=%v", payload["schema_version"])
+	}
+	got, ok := payload["mcp_servers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mcp_servers is not an object: %T", payload["mcp_servers"])
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 servers, got %d", len(got))
+	}
+}
+
+func TestContainerScriptHarness_ApplyMCPSettings_NoOpEmpty(t *testing.T) {
+	h, _ := newTestContainerScriptHarness(t)
+	agentHome := t.TempDir()
+	if err := h.ApplyMCPSettings(agentHome, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(agentHome, ".scion", "harness", "inputs", "mcp-servers.json")); !os.IsNotExist(err) {
+		t.Errorf("empty mcp servers should not write file; stat err=%v", err)
+	}
+}
+
+func TestContainerScriptHarness_StagesScionHarnessHelper(t *testing.T) {
+	h, _ := newTestContainerScriptHarness(t)
+	agentHome := t.TempDir()
+	if err := h.Provision(context.Background(), "agent1", agentHome, agentHome, "/workspace"); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(agentHome, ".scion", "harness", "scion_harness.py")
+	staged, err := os.ReadFile(helper)
+	if err != nil {
+		t.Fatalf("scion_harness.py not staged: %v", err)
+	}
+	if string(staged) != string(SharedHarnessHelperSource()) {
+		t.Errorf("staged scion_harness.py does not match embedded source")
+	}
+}
+
+func TestContainerScriptHarness_ProvisionReferencesMCPInputInManifest(t *testing.T) {
+	h, _ := newTestContainerScriptHarness(t)
+	agentHome := t.TempDir()
+	servers := map[string]api.MCPServerConfig{
+		"x": {Transport: api.MCPTransportStdio, Command: "y"},
+	}
+	if err := h.ApplyMCPSettings(agentHome, servers); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Provision(context.Background(), "a", agentHome, agentHome, "/workspace"); err != nil {
+		t.Fatal(err)
+	}
+	manifestData, err := os.ReadFile(filepath.Join(agentHome, ".scion", "harness", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ProvisionManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(manifest.Inputs.MCPServers, "mcp-servers.json") {
+		t.Errorf("manifest.Inputs.MCPServers=%q", manifest.Inputs.MCPServers)
+	}
+}
+
 func TestResolve_ContainerScriptDispatch(t *testing.T) {
 	home := t.TempDir()
 	configsDir := filepath.Join(home, ".scion", "harness-configs")

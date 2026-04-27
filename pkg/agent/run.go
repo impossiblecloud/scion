@@ -692,6 +692,16 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Stage universal mcp_servers map for the harness's container-side
+	// provisioner. Built-in Go harnesses do not implement MCPSettingsApplier
+	// and continue to use any inline MCP config in their home/ files.
+	if mcpApplier, ok := h.(api.MCPSettingsApplier); ok && finalScionCfg != nil && len(finalScionCfg.MCPServers) > 0 {
+		if err := mcpApplier.ApplyMCPSettings(agentHome, finalScionCfg.MCPServers); err != nil {
+			return nil, fmt.Errorf("failed to apply mcp settings: %w", err)
+		}
+		util.Debugf("mcp: staged %d server(s) for harness=%q", len(finalScionCfg.MCPServers), harnessName)
+	}
+
 	// Inject telemetry config as env vars for sciontool.
 	// Only set vars not already present (respecting explicit overrides).
 	if finalScionCfg != nil && finalScionCfg.Telemetry != nil {

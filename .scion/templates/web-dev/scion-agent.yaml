@@ -28,3 +28,14 @@ services:
       type: tcp
       target: "localhost:9222"
       timeout: "10s"
+
+# Universal MCP server configuration. Container-script harnesses
+# (opencode, codex) provision this into their native config formats
+# automatically. Built-in Go harnesses (claude-web, gemini-web,
+# gemini) still rely on inline mcpServers in their home/ files until
+# they migrate to provision.py — keep both in sync until then.
+mcp_servers:
+  chrome-devtools:
+    transport: stdio
+    command: chrome-devtools-mcp
+    args: ["--headless", "--browser-url", "http://localhost:9222"]

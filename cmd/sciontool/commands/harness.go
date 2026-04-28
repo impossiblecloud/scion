@@ -138,6 +138,14 @@ func runHarnessProvision(ctx context.Context, manifestPath string) error {
 		timeout = t
 	}
 
+	// Log inputs so agent.log captures what the provisioner will see.
+	log.TaggedInfo("provision", "starting harness=%s agent=%s command=%v",
+		manifest.HarnessConfig.Harness, manifest.AgentName, prov.Command)
+	inputFiles := listInputFiles(filepath.Join(bundleRoot, "inputs"))
+	if len(inputFiles) > 0 {
+		log.TaggedInfo("provision", "staged inputs: %s", strings.Join(inputFiles, ", "))
+	}
+
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -150,6 +158,7 @@ func runHarnessProvision(ctx context.Context, manifestPath string) error {
 
 	if err := cmd.Run(); err != nil {
 		stderr := scrubSecrets(stderrBuf.String(), manifest)
+		log.TaggedInfo("provision", "script failed: %s", truncate(stderr, 2048))
 		switch {
 		case runCtx.Err() == context.DeadlineExceeded:
 			return fmt.Errorf("harness provisioner timed out after %s: %s", timeout, truncate(stderr, 4096))
@@ -157,6 +166,13 @@ func runHarnessProvision(ctx context.Context, manifestPath string) error {
 			return fmt.Errorf("harness provisioner exited 2 (unsupported command): %s", truncate(stderr, 4096))
 		default:
 			return fmt.Errorf("harness provisioner failed: %w: %s", err, truncate(stderr, 4096))
+		}
+	}
+
+	// Log the scrubbed script output so it's visible in agent.log.
+	if stderr := scrubSecrets(stderrBuf.String(), manifest); stderr != "" {
+		for _, line := range strings.Split(strings.TrimRight(stderr, "\n"), "\n") {
+			log.TaggedInfo("provision", "%s", line)
 		}
 	}
 
@@ -172,7 +188,7 @@ func runHarnessProvision(ctx context.Context, manifestPath string) error {
 		}
 	}
 
-	log.Info("harness provisioner completed for %s", manifest.AgentName)
+	log.TaggedInfo("provision", "completed for %s", manifest.AgentName)
 	return nil
 }
 
@@ -434,6 +450,21 @@ func collect(node interface{}, out *[]string) {
 			*out = append(*out, v)
 		}
 	}
+}
+
+// listInputFiles returns the basenames of files in the inputs directory.
+func listInputFiles(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }
 
 func truncate(s string, max int) string {

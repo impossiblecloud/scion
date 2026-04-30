@@ -5,7 +5,6 @@ Scripts for provisioning and operating a Scion Hub on a Google Compute Engine VM
 ## Prerequisites
 
 - Google Cloud SDK (`gcloud`) authenticated with a project
-- GitHub CLI (`gh`) authenticated (for deploy key setup)
 - A registered domain with DNS delegated to Cloud DNS (see `gce-certs.sh`)
 
 ## Configuration
@@ -52,19 +51,22 @@ Run the all-in-one deploy script from the repo root:
 ./scripts/starter-hub/gce-demo-deploy.sh
 ```
 
-This runs four steps in sequence:
+This runs six steps in sequence:
 
 | Step | Script | What it does |
 |------|--------|-------------|
+| 0 | `gce-demo-preflight.sh` | Validates local tools, env file, GCP auth, APIs, IAM permissions, and DNS readiness |
 | 1 | `gce-demo-provision.sh` | Creates GCE VM, service account, firewall rules, and (optionally) a GKE cluster |
 | 2 | `gce-demo-telemetry-sa.sh` | Creates a least-privilege GCP service account for agent telemetry export |
-| 3 | `gce-demo-setup-repo.sh` | Generates an SSH deploy key, registers it on GitHub, and clones the repo on the VM |
-| 4 | `gce-start-hub.sh --full` | Uploads config, builds the binary & web assets, installs Caddy + systemd, and starts the hub |
+| 3 | `gce-demo-setup-repo.sh` | Clones the repo on the VM |
+| 4 | `gce-certs.sh` | Cloud DNS zone + Let's Encrypt wildcard certificates |
+| 5 | `gce-start-hub.sh --full` | Uploads config, builds the binary & web assets, installs Caddy + systemd, and starts the hub |
 
-After provisioning, set up DNS and TLS certificates:
+You can also run the preflight check standalone to verify prerequisites
+without provisioning anything:
 
 ```bash
-./scripts/starter-hub/gce-certs.sh
+./scripts/starter-hub/gce-demo-preflight.sh
 ```
 
 ## Redeploying / Restarting
@@ -100,10 +102,11 @@ the telemetry service account.
 
 | Script | Purpose |
 |--------|---------|
-| `gce-demo-deploy.sh` | All-in-one initial deployment (runs the four scripts below) |
+| `gce-demo-deploy.sh` | All-in-one initial deployment (runs preflight then the five scripts below) |
+| `gce-demo-preflight.sh` | Preflight validation — checks tools, env file, GCP auth/APIs/IAM, and DNS before deploying |
 | `gce-demo-provision.sh` | Provision/delete GCE VM and GCP resources |
 | `gce-demo-cluster.sh` | Create/delete GKE Autopilot cluster for agent workloads |
-| `gce-demo-setup-repo.sh` | SSH deploy key + repo clone on the VM |
+| `gce-demo-setup-repo.sh` | Clone the repo on the VM |
 | `gce-demo-telemetry-sa.sh` | Telemetry service account and key management |
 | `gce-start-hub.sh` | Build, deploy, and restart the hub service |
 | `gce-certs.sh` | Cloud DNS setup and Let's Encrypt wildcard certificates |

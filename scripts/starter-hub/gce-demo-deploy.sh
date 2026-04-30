@@ -22,6 +22,11 @@ source "${SCRIPT_DIR}/hub-config.sh"
 
 echo "=== Scion Hub Full Deployment: ${HUB_NAME} ==="
 
+# Step 0: Preflight Checks
+echo ""
+echo "--- Step 0: Preflight Checks ---"
+./scripts/starter-hub/gce-demo-preflight.sh
+
 # Step 1: Provision Infrastructure
 echo ""
 echo "--- Step 1: Provisioning Infrastructure ---"

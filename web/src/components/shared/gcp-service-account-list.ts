@@ -873,6 +873,7 @@ export class ScionGCPServiceAccountList extends LitElement {
             assignment until verification succeeds.
           </p>
           <p>After granting the role, click the refresh icon to re-check verification.</p>
+          <p><strong>Note:</strong> GCP IAM permission changes may take several minutes to propagate.</p>
         </div>
 
         <sl-button slot="footer" variant="primary" @click=${this.closeVerifyFailedDialog}>

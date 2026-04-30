@@ -253,6 +253,93 @@ func TestRunHarnessProvision_ExitCodeTwoIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestRunHarnessProvision_ResolvesHomePrefixInManifestPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bundle := filepath.Join(home, ".scion", "harness")
+	if err := os.MkdirAll(filepath.Join(bundle, "outputs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	envOut := filepath.Join(bundle, "outputs", "env.json")
+	authOut := filepath.Join(bundle, "outputs", "resolved-auth.json")
+
+	scriptPath := filepath.Join(bundle, "provision.sh")
+	writeTestFile(t, scriptPath, "#!/bin/sh\nprintf '{\"ANTHROPIC_API_KEY\":{\"from_file\":\"/tmp/x\"}}\\n' > \""+envOut+"\"\nprintf '{\"method\":\"api-key\"}\\n' > \""+authOut+"\"\nexit 0\n")
+	if err := os.Chmod(scriptPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build manifest with literal $HOME paths, matching what the host-side
+	// containerBundlePath() produces for container portability.
+	manifest := containerProvisionManifest{
+		SchemaVersion:    1,
+		Command:          "provision",
+		AgentName:        "agent",
+		AgentHome:        "$HOME",
+		AgentWorkspace:   "$HOME/workspace",
+		HarnessBundleDir: "$HOME/.scion/harness",
+		HarnessConfig: containerHarnessCfg{
+			Harness: "test",
+			Provisioner: &containerProvisioner{
+				Type:             "container-script",
+				InterfaceVersion: 1,
+				Command:          []string{scriptPath},
+				Timeout:          "5s",
+			},
+		},
+		Inputs: map[string]string{},
+		Outputs: containerOutputs{
+			Env:          "$HOME/.scion/harness/outputs/env.json",
+			ResolvedAuth: "$HOME/.scion/harness/outputs/resolved-auth.json",
+		},
+		Platform: map[string]string{"goos": "linux"},
+	}
+	manifestPath := writeManifest(t, bundle, manifest)
+
+	if err := runHarnessProvision(context.Background(), manifestPath); err != nil {
+		t.Fatalf("runHarnessProvision with $HOME paths: %v", err)
+	}
+
+	for _, want := range []string{envOut, authOut} {
+		if _, err := os.Stat(want); err != nil {
+			t.Errorf("missing output %s: %v", want, err)
+		}
+	}
+}
+
+func TestResolveManifestHomePaths(t *testing.T) {
+	m := &containerProvisionManifest{
+		HarnessBundleDir: "$HOME/.scion/harness",
+		AgentHome:        "$HOME",
+		AgentWorkspace:   "$HOME/workspace",
+		Outputs: containerOutputs{
+			Env:          "$HOME/.scion/harness/outputs/env.json",
+			ResolvedAuth: "$HOME/.scion/harness/outputs/resolved-auth.json",
+			Status:       "$HOME/.scion/harness/outputs/status.json",
+		},
+		Inputs: map[string]string{
+			"auth_candidates": "$HOME/.scion/harness/inputs/auth-candidates.json",
+		},
+	}
+
+	t.Setenv("HOME", "/home/scion")
+	resolveManifestHomePaths(m, "/home/scion")
+
+	if m.HarnessBundleDir != "/home/scion/.scion/harness" {
+		t.Errorf("HarnessBundleDir = %q, want /home/scion/.scion/harness", m.HarnessBundleDir)
+	}
+	if m.AgentHome != "/home/scion" {
+		t.Errorf("AgentHome = %q, want /home/scion", m.AgentHome)
+	}
+	if m.Outputs.Env != "/home/scion/.scion/harness/outputs/env.json" {
+		t.Errorf("Outputs.Env = %q", m.Outputs.Env)
+	}
+	if m.Inputs["auth_candidates"] != "/home/scion/.scion/harness/inputs/auth-candidates.json" {
+		t.Errorf("Inputs[auth_candidates] = %q", m.Inputs["auth_candidates"])
+	}
+}
+
 func TestScrubSecrets_RedactsAuthCandidateValues(t *testing.T) {
 	home := t.TempDir()
 	bundle := filepath.Join(home, ".scion", "harness")

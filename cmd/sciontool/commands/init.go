@@ -169,6 +169,7 @@ func runInit(args []string) int {
 
 	// Initialize lifecycle hooks manager
 	lifecycleManager := hooks.NewLifecycleManager()
+	lifecycleManager.AgentHome = agentHome
 	// Register the per-agent hooks directory so container-script harnesses
 	// (whose pre-start wrapper is staged at $HOME/.scion/hooks/pre-start.d/)
 	// participate in the standard hook discovery alongside system hooks.

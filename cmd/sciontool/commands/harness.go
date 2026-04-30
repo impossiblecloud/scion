@@ -117,6 +117,11 @@ func runHarnessProvision(ctx context.Context, manifestPath string) error {
 	}
 	bundleRoot := filepath.Join(home, ".scion", "harness")
 
+	// Resolve $HOME prefixes in manifest paths. The host-side Provision()
+	// encodes paths with literal "$HOME/" for container portability; expand
+	// them now so validation and file-existence checks use absolute paths.
+	resolveManifestHomePaths(manifest, home)
+
 	if err := validateManifestPaths(manifest, bundleRoot, home); err != nil {
 		return err
 	}
@@ -211,6 +216,36 @@ func loadProvisionManifest(path string) (*containerProvisionManifest, error) {
 		return nil, fmt.Errorf("manifest schema_version %d is newer than supported (1)", manifest.SchemaVersion)
 	}
 	return &manifest, nil
+}
+
+// resolveManifestHomePaths expands literal "$HOME" prefixes in all path
+// fields of the manifest to the given home directory. The host-side
+// Provision() uses "$HOME/" for container portability; the container-side
+// code needs absolute paths for validation and file operations.
+func resolveManifestHomePaths(m *containerProvisionManifest, home string) {
+	resolve := func(p string) string {
+		if p == "$HOME" {
+			return home
+		}
+		if len(p) >= 6 && p[:6] == "$HOME/" {
+			return filepath.Join(home, p[6:])
+		}
+		return p
+	}
+	m.HarnessBundleDir = resolve(m.HarnessBundleDir)
+	m.AgentHome = resolve(m.AgentHome)
+	m.AgentWorkspace = resolve(m.AgentWorkspace)
+	m.Outputs.Env = resolve(m.Outputs.Env)
+	m.Outputs.ResolvedAuth = resolve(m.Outputs.ResolvedAuth)
+	m.Outputs.Status = resolve(m.Outputs.Status)
+
+	if m.Inputs != nil {
+		resolved := make(map[string]string, len(m.Inputs))
+		for k, v := range m.Inputs {
+			resolved[k] = resolve(v)
+		}
+		m.Inputs = resolved
+	}
 }
 
 // validateManifestPaths refuses to run if any path in the manifest escapes the

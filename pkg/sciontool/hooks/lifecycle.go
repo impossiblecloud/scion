@@ -24,6 +24,12 @@ type LifecycleManager struct {
 
 	// Handlers are the registered handlers for lifecycle events.
 	Handlers map[string][]Handler
+
+	// AgentHome overrides the HOME environment variable for hook scripts.
+	// Init runs as root (HOME=/root) but hook scripts (especially the
+	// container-script harness provisioner) need HOME to point at the
+	// scion user's home directory where the harness bundle is staged.
+	AgentHome string
 }
 
 // NewLifecycleManager creates a new lifecycle manager.
@@ -203,10 +209,28 @@ func (m *LifecycleManager) executeScript(path string) error {
 	cmd := exec.Command(path)
 	cmd.Stdout = os.Stderr // Redirect hook output to stderr
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
+	cmd.Env = m.hookEnv()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("execution failed: %w", err)
 	}
 	return nil
+}
+
+// hookEnv builds the environment for hook scripts. When AgentHome is set,
+// HOME is overridden so that $HOME in hook scripts resolves to the scion
+// user's home directory rather than root's.
+func (m *LifecycleManager) hookEnv() []string {
+	env := os.Environ()
+	if m.AgentHome == "" {
+		return env
+	}
+	override := "HOME=" + m.AgentHome
+	for i, e := range env {
+		if strings.HasPrefix(e, "HOME=") {
+			env[i] = override
+			return env
+		}
+	}
+	return append(env, override)
 }

@@ -139,6 +139,32 @@ func TestRunPreStart_MissingDirsAreSkipped(t *testing.T) {
 	}
 }
 
+func TestRunPreStart_AgentHomeOverridesHOMEInHooks(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "home-marker")
+
+	// Script writes $HOME to marker file
+	mustWriteScript(t, filepath.Join(dir, "pre-start.d", "10-check-home"),
+		"#!/bin/sh\necho -n \"$HOME\" > "+marker+"\n")
+
+	agentHome := "/home/scion"
+	m := &LifecycleManager{
+		HooksDirs: []string{dir},
+		Handlers:  map[string][]Handler{},
+		AgentHome: agentHome,
+	}
+	if err := m.RunPreStart(); err != nil {
+		t.Fatalf("RunPreStart: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if string(got) != agentHome {
+		t.Errorf("HOME in hook = %q, want %q", string(got), agentHome)
+	}
+}
+
 func mustWriteScript(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

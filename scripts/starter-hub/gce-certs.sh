@@ -50,31 +50,31 @@ echo "Registrar Nameservers:"
 gcloud dns managed-zones describe "${ZONE_NAME}" --format="value(nameServers)" | tr ';' '\n'
 echo "--------------------------------------------------"
 
-# 3. Add A Record for the Hub
+# 3. Add or Update A Record for the Hub
 echo "Checking A record for ${HUB_SUBDOMAIN}..."
 EXTERNAL_IP=$(gcloud compute instances describe "${INSTANCE_NAME}" --zone="${GCE_ZONE}" --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
 
+# Try to get the current IP of the record
 CURRENT_RECORD_IP=$(gcloud dns record-sets list --zone="${ZONE_NAME}" --name="${HUB_SUBDOMAIN}." --type="A" --format="value(rrdatas[0])" 2>/dev/null || true)
 
-if [[ "$CURRENT_RECORD_IP" == "$EXTERNAL_IP" ]]; then
-    echo "A record for ${HUB_SUBDOMAIN} already points to ${EXTERNAL_IP}."
-else
-    # Check if the record exists at all by checking if the list command returned anything
-    if gcloud dns record-sets list --zone="${ZONE_NAME}" --name="${HUB_SUBDOMAIN}." --type="A" --format="value(name)" | grep -q "${HUB_SUBDOMAIN}"; then
-        echo "Updating A record for ${HUB_SUBDOMAIN} from ${CURRENT_RECORD_IP:-unknown} to ${EXTERNAL_IP}..."
+if [[ -n "$CURRENT_RECORD_IP" ]]; then
+    if [[ "$CURRENT_RECORD_IP" == "$EXTERNAL_IP" ]]; then
+        echo "A record for ${HUB_SUBDOMAIN} already points to correct IP: ${EXTERNAL_IP}."
+    else
+        echo "Updating A record for ${HUB_SUBDOMAIN} from ${CURRENT_RECORD_IP} to ${EXTERNAL_IP}..."
         gcloud dns record-sets update "${HUB_SUBDOMAIN}." \
             --zone="${ZONE_NAME}" \
             --type="A" \
             --ttl="300" \
             --rrdatas="${EXTERNAL_IP}"
-    else
-        echo "Creating A record for ${HUB_SUBDOMAIN} pointing to ${EXTERNAL_IP}..."
-        gcloud dns record-sets create "${HUB_SUBDOMAIN}." \
-            --zone="${ZONE_NAME}" \
-            --type="A" \
-            --ttl="300" \
-            --rrdatas="${EXTERNAL_IP}"
     fi
+else
+    echo "Creating A record for ${HUB_SUBDOMAIN} pointing to ${EXTERNAL_IP}..."
+    gcloud dns record-sets create "${HUB_SUBDOMAIN}." \
+        --zone="${ZONE_NAME}" \
+        --type="A" \
+        --ttl="300" \
+        --rrdatas="${EXTERNAL_IP}"
 fi
 
 # 4. Obtain Wildcard Certificate via SSH on the instance
@@ -92,6 +92,12 @@ else
         --email ${EMAIL} \
         --non-interactive \
         --agree-tos"
+fi
+
+# 5. Reload Caddy if it's installed to pick up new/renewed certificates
+if gcloud compute ssh "${INSTANCE_NAME}" --zone="${GCE_ZONE}" --command="command -v caddy" &>/dev/null; then
+    echo "Reloading Caddy on ${INSTANCE_NAME}..."
+    gcloud compute ssh "${INSTANCE_NAME}" --zone="${GCE_ZONE}" --command="sudo systemctl reload caddy || sudo caddy reload --config /etc/caddy/Caddyfile"
 fi
 
 echo ""

@@ -604,9 +604,10 @@ func (r *CommandRouter) cmdLink(ctx context.Context, event *ChatEvent, args []st
 		return textResponse(event, fmt.Sprintf("Failed to save link: %v", err)), nil
 	}
 
-	// Request subscription for the grove's messages via broker plugin
+	// Subscribe only to user-targeted messages so that agent-to-agent
+	// traffic and broadcasts do not leak into chat.
 	if r.broker != nil {
-		pattern := fmt.Sprintf("scion.grove.%s.>", grove.ID)
+		pattern := fmt.Sprintf("scion.grove.%s.user.>", grove.ID)
 		if err := r.broker.RequestSubscription(pattern); err != nil {
 			r.log.Warn("failed to request grove subscription", "grove_id", grove.ID, "error", err)
 		}
@@ -624,9 +625,9 @@ func (r *CommandRouter) cmdUnlink(ctx context.Context, event *ChatEvent, args []
 		return textResponse(event, "This space is not linked to any grove."), nil
 	}
 
-	// Cancel broker subscription
+	// Cancel broker subscription (must match the pattern used during link).
 	if r.broker != nil {
-		pattern := fmt.Sprintf("scion.grove.%s.>", link.GroveID)
+		pattern := fmt.Sprintf("scion.grove.%s.user.>", link.GroveID)
 		if err := r.broker.CancelSubscription(pattern); err != nil {
 			r.log.Warn("failed to cancel grove subscription", "grove_id", link.GroveID, "error", err)
 		}

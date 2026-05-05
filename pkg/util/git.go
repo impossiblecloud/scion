@@ -439,7 +439,8 @@ func NormalizeGitRemote(remote string) string {
 		}
 	}
 
-	// Remove .git suffix
+	// Remove trailing slashes and .git suffix
+	remote = strings.TrimRight(remote, "/")
 	remote = strings.TrimSuffix(remote, ".git")
 
 	return remote
@@ -521,6 +522,9 @@ func ToHTTPSCloneURL(gitURL string) string {
 			result = result[atIdx+1:]
 		}
 	}
+
+	// Strip trailing slashes before adding .git suffix
+	result = strings.TrimRight(result, "/")
 
 	// Ensure .git suffix
 	if !strings.HasSuffix(result, ".git") {

@@ -487,6 +487,8 @@ func TestNormalizeGitRemote(t *testing.T) {
 		{"https oauth", "https://user:x-oauth-basic@github.com/org/repo.git", "github.com/org/repo"},
 		{"https user only", "https://user@github.com/org/repo.git", "github.com/org/repo"},
 		{"uppercase host", "https://GitHub.COM/org/repo.git", "github.com/org/repo"},
+		{"https trailing slash", "https://github.com/org/repo/", "github.com/org/repo"},
+		{"https trailing slash with .git", "https://github.com/org/repo.git/", "github.com/org/repo"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -507,6 +509,8 @@ func TestNormalizeGitRemote_CrossProtocolConsistency(t *testing.T) {
 		"ssh://git@github.com/ptone/gamegame.git",
 		"https://x-access-token:TOKEN@github.com/ptone/gamegame.git",
 		"git://github.com/ptone/gamegame.git",
+		"https://github.com/ptone/gamegame/",
+		"https://github.com/ptone/gamegame",
 	}
 
 	want := "github.com/ptone/gamegame"

@@ -37,7 +37,7 @@ ARG GH_VERSION=2.100.0
 # floor. A base that ships something newer keeps it — these images serve many
 # consumers besides scion, so we do not downgrade one to suit the other.
 ARG GO_MIN_VERSION=1.26.1
-ARG GO_VERSION=1.26.1
+ARG GO_VERSION=1.26.4
 
 # Git is vendored from the Chainguard git image rather than compiled from
 # source. Chainguard tracks upstream closely (currently 2.55.0) and rebuilds on
@@ -136,8 +136,97 @@ RUN /opt/scion-image-build/lib/install-core-toolchain.sh go "${GO_MIN_VERSION}" 
 ARG GH_VERSION
 RUN /opt/scion-image-build/lib/install-core-toolchain.sh gh "${GH_VERSION}"
 
-RUN /opt/scion-image-build/lib/install-core-toolchain.sh kubectl
+# Pinned rather than tracking dl.k8s.io/release/stable.txt, so a rebuild of an
+# old image produces the same kubectl it originally shipped. The step falls back
+# to stable when no version is passed, which is what thick-prep does.
+ARG KUBECTL_VERSION=v1.36.1
+RUN /opt/scion-image-build/lib/install-core-toolchain.sh kubectl "${KUBECTL_VERSION}"
 RUN /opt/scion-image-build/lib/install-core-toolchain.sh golangci-lint
+
+# --- Infrastructure tooling --------------------------------------------------
+# Everything below is core-base only: it is not part of the base contract that
+# ../lib/verify-base-contract.sh asserts, and thick-prep does not install it.
+# That is why these stay as RUN steps here instead of moving into
+# ../lib/install-core-toolchain.sh — a tool only one chain installs cannot drift
+# between the two chains, and the script is reserved for what both must share.
+
+# Install OpenTofu
+ARG TOFU_VERSION=1.12.1
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_${ARCH}.deb" \
+        -o /tmp/tofu.deb \
+    && dpkg -i /tmp/tofu.deb \
+    && rm /tmp/tofu.deb
+
+# Install Helm
+ARG HELM_VERSION=v4.2.0
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
+    | tar -xz --strip-components=1 -C /usr/local/bin linux-${ARCH}/helm
+
+# Install Helmfile
+ARG HELMFILE_VERSION=1.5.2
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin helmfile
+
+# Install Helm diff plugin (required by helmfile)
+# Install into a shared location so all users can find it
+ENV HELM_DATA_HOME=/usr/local/share/helm
+ARG HELM_DIFF_VERSION=3.15.7
+# --verify=false is required for URL-based plugin installs; Helm's verification
+# mechanism only works for plugins served from a signed repository index.
+RUN helm plugin install https://github.com/databus23/helm-diff \
+    --version "${HELM_DIFF_VERSION}" --verify=false
+RUN chmod -R a+rwX /usr/local/share/helm
+
+# Install single-binary tools (talosctl, butane, yq, terragrunt)
+ARG TALOS_VERSION=v1.13.3
+ARG BUTANE_VERSION=v0.28.0
+ARG YQ_VERSION=4.53.2
+ARG TERRAGRUNT_VERSION=1.0.7
+RUN ARCH=$(dpkg --print-architecture) && \
+    BUTANE_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-gnu") && \
+    curl -fsSL "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-${ARCH}" \
+        -o /usr/local/bin/talosctl \
+    && curl -fsSL "https://github.com/coreos/butane/releases/download/${BUTANE_VERSION}/butane-${BUTANE_ARCH}" \
+        -o /usr/local/bin/butane \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH}" \
+        -o /usr/local/bin/yq \
+    && curl -fsSL "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_${ARCH}" \
+        -o /usr/local/bin/terragrunt \
+    && chmod +x /usr/local/bin/talosctl /usr/local/bin/butane \
+               /usr/local/bin/yq /usr/local/bin/terragrunt
+
+# Install AWS CLI v2
+RUN ARCH=$(dpkg --print-architecture) && \
+    AWS_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/awscliv2.zip /tmp/aws
+
+# Install SOPS (Secrets OPerationS)
+ARG SOPS_VERSION=3.13.1
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${ARCH}" \
+        -o /usr/local/bin/sops && \
+    chmod +x /usr/local/bin/sops
+
+# Install Kubeshark CLI (for remote MCP access via kubeshark mcp serve)
+ARG KUBESHARK_VERSION=53.3.0
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/kubeshark/kubeshark/releases/download/v${KUBESHARK_VERSION}/kubeshark_linux_${ARCH}" \
+        -o /usr/local/bin/kubeshark && \
+    chmod +x /usr/local/bin/kubeshark
+
+# Install stern (multi-pod log tailing)
+ARG STERN_VERSION=1.34.0
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin stern && \
+    chmod +x /usr/local/bin/stern
+
 
 # Copy Bun from bun-source
 COPY --from=bun-source /usr/local/bin/bun /usr/local/bin/bun
@@ -160,12 +249,20 @@ ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 # persists in the image; use the pipconf build secret instead.
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
-ENV PATH=/usr/local/share/npm-global/bin:/usr/local/go/bin:/usr/local/gcloud/google-cloud-sdk/bin:$PATH
+
+ENV GOPATH=/root/go
+ENV PATH=/usr/local/share/npm-global/bin:/usr/local/go/bin:/root/go/bin:/usr/local/gcloud/google-cloud-sdk/bin:$PATH
 ENV LC_ALL=C.UTF-8
 ENV EDITOR=nano
 ENV VISUAL=nano
 
-# Chrome DevTools MCP server and the playwright CLI, installed globally.
+# yamllint and PyYAML. Deliberately after the ENV block above so the install
+# honours PIP_INDEX_URL — run any earlier and the pip mirror escape hatch is
+# silently bypassed.
+RUN pip3 install --no-cache-dir --break-system-packages yamllint pyyaml
+
+# Chrome DevTools MCP server, the playwright CLI and the Prometheus MCP server,
+# installed globally.
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
     /opt/scion-image-build/lib/install-core-toolchain.sh npm-tools
 

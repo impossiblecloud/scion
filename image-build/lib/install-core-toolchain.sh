@@ -111,10 +111,12 @@ ensure_google_keyring() {
 # it gets its own step so that difference is visible rather than buried in a
 # 30-line install list that fails as a unit.
 COMMON_PACKAGES="
-  tmux ca-certificates libexpat1 zlib1g python3 python3-venv make g++ man-db
-  curl wget dnsutils less jq bc unzip rsync ripgrep procps psmisc lsof socat
-  sudo fzf zsh gnupg2 iptables ipset iproute2 aggregate nano vim openssh-client
-  lsb-release dbus-x11 gnome-keyring libsecret-1-0 libsecret-tools
+  tmux ca-certificates libexpat1 zlib1g python3 python3-venv python3-pip make
+  g++ man-db curl wget dnsutils less jq bc unzip zip xz-utils rsync ripgrep
+  procps psmisc lsof socat sudo fzf zsh gnupg2 iptables ipset iproute2
+  aggregate nano vim openssh-client lsb-release dbus-x11 gnome-keyring
+  libsecret-1-0 libsecret-tools gosu tree file openssl bash-completion
+  iputils-ping netcat-openbsd net-tools
 "
 
 step_apt_common() {
@@ -267,15 +269,23 @@ step_gcloud() {
   apt_cleanup
 }
 
+# kubectl. Takes an optional version (e.g. v1.36.1); core-base pins one so a
+# rebuild is reproducible, while a base that already ships kubectl keeps it.
+# With no argument the current stable release is used, which is what the bases
+# that do not care about the exact version get.
 step_kubectl() {
   if command -v kubectl >/dev/null 2>&1; then
     skip "kubectl already present ($(command -v kubectl))"
     return 0
   fi
-  log "installing kubectl"
-  local stable
-  stable="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
-  curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${stable}/bin/linux/$(deb_arch)/kubectl"
+  local want="${1:-}"
+  if [ -z "$want" ]; then
+    want="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+    log "installing kubectl $want (current stable)"
+  else
+    log "installing kubectl $want (pinned)"
+  fi
+  curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${want}/bin/linux/$(deb_arch)/kubectl"
   install -o root -g root -m 0755 /tmp/kubectl /usr/local/bin/kubectl
   rm -f /tmp/kubectl
 }
@@ -330,7 +340,7 @@ step_npm_global() {
 # Dockerfile (ENV cannot be set from here) or these land in the wrong place.
 step_npm_tools() {
   log "installing global npm tooling"
-  npm install -g chrome-devtools-mcp @playwright/cli@latest
+  npm install -g chrome-devtools-mcp @playwright/cli@latest prometheus-mcp-server
 }
 
 # Free uid 1000 for the scion user that scion-base creates. Matched by uid

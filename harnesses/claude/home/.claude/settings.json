@@ -6,9 +6,6 @@
     "enabled": false
   },
   "permissions": {
-    "allow": [
-      "*"
-    ],
     "deny": [
       "EnterPlanMode",
       "ExitPlanMode",

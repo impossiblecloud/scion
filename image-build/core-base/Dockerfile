@@ -37,7 +37,7 @@ ARG GH_VERSION=2.100.0
 # floor. A base that ships something newer keeps it — these images serve many
 # consumers besides scion, so we do not downgrade one to suit the other.
 ARG GO_MIN_VERSION=1.26.1
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.6
 
 # Git is vendored from the Chainguard git image rather than compiled from
 # source. Chainguard tracks upstream closely (currently 2.55.0) and rebuilds on
@@ -139,7 +139,7 @@ RUN /opt/scion-image-build/lib/install-core-toolchain.sh gh "${GH_VERSION}"
 # Pinned rather than tracking dl.k8s.io/release/stable.txt, so a rebuild of an
 # old image produces the same kubectl it originally shipped. The step falls back
 # to stable when no version is passed, which is what thick-prep does.
-ARG KUBECTL_VERSION=v1.36.1
+ARG KUBECTL_VERSION=v1.36.3
 RUN /opt/scion-image-build/lib/install-core-toolchain.sh kubectl "${KUBECTL_VERSION}"
 RUN /opt/scion-image-build/lib/install-core-toolchain.sh golangci-lint
 
@@ -151,7 +151,7 @@ RUN /opt/scion-image-build/lib/install-core-toolchain.sh golangci-lint
 # between the two chains, and the script is reserved for what both must share.
 
 # Install OpenTofu
-ARG TOFU_VERSION=1.12.1
+ARG TOFU_VERSION=1.12.5
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_${ARCH}.deb" \
         -o /tmp/tofu.deb \
@@ -159,13 +159,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
     && rm /tmp/tofu.deb
 
 # Install Helm
-ARG HELM_VERSION=v4.2.0
+ARG HELM_VERSION=v4.2.4
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
     | tar -xz --strip-components=1 -C /usr/local/bin linux-${ARCH}/helm
 
 # Install Helmfile
-ARG HELMFILE_VERSION=1.5.2
+ARG HELMFILE_VERSION=1.7.4
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_${ARCH}.tar.gz" \
     | tar -xz -C /usr/local/bin helmfile
@@ -173,7 +173,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Install Helm diff plugin (required by helmfile)
 # Install into a shared location so all users can find it
 ENV HELM_DATA_HOME=/usr/local/share/helm
-ARG HELM_DIFF_VERSION=3.15.7
+ARG HELM_DIFF_VERSION=3.15.11
 # --verify=false is required for URL-based plugin installs; Helm's verification
 # mechanism only works for plugins served from a signed repository index.
 RUN helm plugin install https://github.com/databus23/helm-diff \
@@ -181,10 +181,10 @@ RUN helm plugin install https://github.com/databus23/helm-diff \
 RUN chmod -R a+rwX /usr/local/share/helm
 
 # Install single-binary tools (talosctl, butane, yq, terragrunt)
-ARG TALOS_VERSION=v1.13.3
-ARG BUTANE_VERSION=v0.28.0
-ARG YQ_VERSION=4.53.2
-ARG TERRAGRUNT_VERSION=1.0.7
+ARG TALOS_VERSION=v1.13.8
+ARG BUTANE_VERSION=v0.29.0
+ARG YQ_VERSION=4.53.3
+ARG TERRAGRUNT_VERSION=1.1.3
 RUN ARCH=$(dpkg --print-architecture) && \
     BUTANE_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-gnu") && \
     curl -fsSL "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-${ARCH}" \
@@ -207,14 +207,14 @@ RUN ARCH=$(dpkg --print-architecture) && \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
 
 # Install SOPS (Secrets OPerationS)
-ARG SOPS_VERSION=3.13.1
+ARG SOPS_VERSION=3.13.3
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${ARCH}" \
         -o /usr/local/bin/sops && \
     chmod +x /usr/local/bin/sops
 
 # Install Kubeshark CLI (for remote MCP access via kubeshark mcp serve)
-ARG KUBESHARK_VERSION=53.3.0
+ARG KUBESHARK_VERSION=53.4.0
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/kubeshark/kubeshark/releases/download/v${KUBESHARK_VERSION}/kubeshark_linux_${ARCH}" \
         -o /usr/local/bin/kubeshark && \

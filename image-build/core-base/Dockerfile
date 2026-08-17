@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.6
 RUN ARCH=$(dpkg --print-architecture) && \
     case "${ARCH}" in \
       amd64) GO_ARCH='linux-amd64' ;; \
@@ -59,9 +59,9 @@ RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -
 
 # Install Git from source
 WORKDIR /opt
-RUN wget https://www.kernel.org/pub/software/scm/git/git-2.54.0.tar.gz
-RUN tar -xvf git-2.54.0.tar.gz
-WORKDIR /opt/git-2.54.0/
+RUN wget https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.gz
+RUN tar -xvf git-2.55.0.tar.gz
+WORKDIR /opt/git-2.55.0/
 RUN make -j"$(nproc 2>/dev/null || echo 1)" prefix=/usr/local all && \
     make -j"$(nproc 2>/dev/null || echo 1)" prefix=/usr/local install
 
@@ -167,7 +167,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN pip3 install --no-cache-dir yamllint pyyaml --break-system-packages
 
 # Install OpenTofu
-ARG TOFU_VERSION=1.12.1
+ARG TOFU_VERSION=1.12.5
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_${ARCH}.deb" \
         -o /tmp/tofu.deb \
@@ -175,20 +175,20 @@ RUN ARCH=$(dpkg --print-architecture) && \
     && rm /tmp/tofu.deb
 
 # Install kubectl
-ARG KUBECTL_VERSION=v1.36.1
+ARG KUBECTL_VERSION=v1.36.3
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
         -o /usr/local/bin/kubectl \
     && chmod +x /usr/local/bin/kubectl
 
 # Install Helm
-ARG HELM_VERSION=v4.2.0
+ARG HELM_VERSION=v4.2.4
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" \
     | tar -xz --strip-components=1 -C /usr/local/bin linux-${ARCH}/helm
 
 # Install Helmfile
-ARG HELMFILE_VERSION=1.5.2
+ARG HELMFILE_VERSION=1.7.4
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_${ARCH}.tar.gz" \
     | tar -xz -C /usr/local/bin helmfile
@@ -196,7 +196,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Install Helm diff plugin (required by helmfile)
 # Install into a shared location so all users can find it
 ENV HELM_DATA_HOME=/usr/local/share/helm
-ARG HELM_DIFF_VERSION=3.15.7
+ARG HELM_DIFF_VERSION=3.15.11
 # --verify=false is required for URL-based plugin installs; Helm's verification
 # mechanism only works for plugins served from a signed repository index.
 RUN helm plugin install https://github.com/databus23/helm-diff \
@@ -204,10 +204,10 @@ RUN helm plugin install https://github.com/databus23/helm-diff \
 RUN chmod -R a+rwX /usr/local/share/helm
 
 # Install single-binary tools (talosctl, butane, yq, terragrunt)
-ARG TALOS_VERSION=v1.13.3
-ARG BUTANE_VERSION=v0.28.0
-ARG YQ_VERSION=4.53.2
-ARG TERRAGRUNT_VERSION=1.0.7
+ARG TALOS_VERSION=v1.13.8
+ARG BUTANE_VERSION=v0.29.0
+ARG YQ_VERSION=4.53.3
+ARG TERRAGRUNT_VERSION=1.1.3
 RUN ARCH=$(dpkg --print-architecture) && \
     BUTANE_ARCH=$([ "${ARCH}" = "arm64" ] && echo "aarch64-unknown-linux-gnu" || echo "x86_64-unknown-linux-gnu") && \
     curl -fsSL "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-${ARCH}" \
@@ -258,14 +258,14 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
 RUN npm install -g prometheus-mcp-server
 
 # Install SOPS (Secrets OPerationS)
-ARG SOPS_VERSION=3.13.1
+ARG SOPS_VERSION=3.13.3
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${ARCH}" \
         -o /usr/local/bin/sops && \
     chmod +x /usr/local/bin/sops
 
 # Install Kubeshark CLI (for remote MCP access via kubeshark mcp serve)
-ARG KUBESHARK_VERSION=53.3.0
+ARG KUBESHARK_VERSION=53.4.0
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/kubeshark/kubeshark/releases/download/v${KUBESHARK_VERSION}/kubeshark_linux_${ARCH}" \
         -o /usr/local/bin/kubeshark && \
